@@ -1,51 +1,51 @@
 # Click2Save Electron
 
-Electron version of Click2Save migrated from the root product documents.
+从主产品文档迁移而来的 Click2Save Electron 版本。
 
-## Features
+## 功能
 
-- Text and image collection
-- Date filtering
-- Record list and detail panel
-- Image thumbnails
-- Note editing
-- Manual text creation
-- Delete record
-- Tray and notifications
-- Auto judgment
-- Copy-then-key capture
-- Double-copy capture
-- Alt+Q capture for current clipboard content
+- 文本与图片采集
+- 日期筛选
+- 记录列表与详情面板
+- 图片缩略图展示
+- 备注编辑
+- 手动创建文本
+- 删除记录
+- 托盘与通知
+- 自动判断
+- 先复制后按键采集
+- 双击复制采集
+- `Alt+Q` 采集当前剪贴板内容
 
-## Structure
+## 目录结构
 
-- `src/main`: main process, storage, tray, clipboard monitor
-- `src/renderer`: UI and interactions
-- `data`: local development data directory
+- `src/main`：主进程、存储、托盘、剪贴板监听
+- `src/renderer`：界面与交互
+- `data`：本地开发数据目录
 
-## Install
+## 安装
 
-Run inside `Click2Save.Electron`:
+在 `Click2Save.Electron` 目录下执行：
 
 ```bash
 npm install
 ```
 
-## Start
+## 启动
 
 ```bash
 npm run dev
 ```
 
-## Build
+## 构建
 
 ```bash
 npm run dist
 ```
 
-## Notes
+## 说明
 
-- Current storage layer uses JSON files for fast startup
-- Current `Alt+Q` implementation captures current clipboard content
-- To fully simulate copy-from-selection on `Alt+Q`, add an OS automation library later
-- `copy-then-key` depends on `uiohook-napi`
+- 当前存储层使用 JSON 文件，以便更快启动
+- 当前 `Alt+Q` 实现会采集当前剪贴板内容
+- 若要在 `Alt+Q` 下完整模拟“从选区复制”，后续可接入系统自动化库
+- `copy-then-key` 依赖 `uiohook-napi`
