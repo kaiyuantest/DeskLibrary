@@ -4,3 +4,33 @@ dist/
 data/
 %SystemDrive%/
 .gitdata/
+
+# =========================
+# 敏感信息与本地私密文件（避免误提交）
+# =========================
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# 私钥与证书
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# 凭证与密钥文件
+credentials.json
+credentials.*.json
+secrets.json
+secret.json
+token.json
+*.token
+
+# 本地数据库与日志（常包含隐私数据）
+*.sqlite
+*.sqlite3
+*.db
+*.log
