@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Click2Save</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand-mark" title="Click2Save">C</div>
+
+        <nav class="nav-rail">
+          <button id="dailyPageBtn" class="rail-btn active" title="每日内容">☰</button>
+          <button id="commonPageBtn" class="rail-btn" title="其它分类">★</button>
+          <button id="settingsPageBtn" class="rail-btn" title="设置">⚙</button>
+        </nav>
+
+        <div class="sidebar-bottom">
+          <button id="refreshBtn" class="rail-btn ghost" title="刷新">↻</button>
+        </div>
+      </aside>
+
+      <main class="main-shell">
+        <header class="topbar">
+          <div>
+            <h1 id="pageTitle">每日内容</h1>
+            <p id="statusText">后台监听中</p>
+          </div>
+          <div class="topbar-actions">
+            <input id="dailySearchInput" class="search-input" type="text" placeholder="搜索内容 / 备注" />
+            <input id="dailyDatePicker" class="date-input" type="date" />
+            <div id="dailyFilterBar" class="filter-bar"></div>
+          </div>
+        </header>
+
+        <section id="dailyPage" class="page-view">
+          <section class="composer-inline">
+            <textarea id="newRecordDraft" rows="2" placeholder="快速记一条备忘..."></textarea>
+            <button id="createRecordBtn" class="icon-action primary" title="新增">＋</button>
+          </section>
+
+          <section class="section-head compact">
+            <span>每日内容</span>
+            <span id="dailyCount" class="count-chip">0</span>
+          </section>
+          <section id="recordsList" class="cards-grid"></section>
+          <div id="dailyPagination" class="pagination-bar"></div>
+        </section>
+
+        <section id="commonPage" class="page-view hidden">
+          <div class="other-grid">
+            <section class="panel minimalist-panel">
+              <div class="section-head">
+                <span>常用分类</span>
+                <span id="commonCount" class="count-chip">0</span>
+              </div>
+              <section id="commonRecordsList" class="cards-grid compact-grid"></section>
+            </section>
+
+            <section class="panel minimalist-panel">
+              <div class="section-head">
+                <span>今日高频</span>
+              </div>
+              <div id="topDailyList" class="quick-list"></div>
+            </section>
+
+            <section class="panel minimalist-panel">
+              <div class="section-head">
+                <span>最近命中</span>
+              </div>
+              <div id="recentDailyList" class="quick-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="settingsPage" class="page-view hidden">
+          <section class="panel minimalist-panel settings-panel">
+            <div class="settings-list">
+              <label class="setting-row"><span>自动判断</span><input id="autoJudgmentEnabled" type="checkbox" /></label>
+              <label class="setting-row"><span>Alt+Q</span><input id="altQEnabled" type="checkbox" /></label>
+              <label class="setting-row"><span>双复制</span><input id="doubleCopyEnabled" type="checkbox" /></label>
+              <label class="setting-row"><span>复制后按键</span><input id="copyThenKeyEnabled" type="checkbox" /></label>
+              <label class="setting-row"><span>开机启动</span><input id="startupLaunchEnabled" type="checkbox" /></label>
+              <label class="setting-row"><span>悬浮图标</span><input id="floatingIconEnabled" type="checkbox" /></label>
+              <label class="setting-row"><span>靠边显示</span><input id="dockToEdgeEnabled" type="checkbox" /></label>
+            </div>
+
+            <div class="settings-key-row">
+              <span>复制后按键</span>
+              <input id="postCopyKey" type="text" placeholder="Shift / Ctrl / Alt" />
+            </div>
+
+            <button id="saveSettingsBtn" class="save-pill">保存</button>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <div id="recordModal" class="modal hidden">
+      <div id="modalOverlay" class="modal-overlay"></div>
+      <section class="modal-card">
+        <div class="modal-head">
+          <div>
+            <div id="modalTitle" class="modal-title">请选择一条记录</div>
+            <div id="modalSubline" class="modal-subline">-</div>
+          </div>
+          <button id="closeModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+
+        <div class="modal-meta">
+          <div><span class="meta-label">类型</span><span id="modalType">-</span></div>
+          <div><span class="meta-label">方式</span><span id="modalMethod">-</span></div>
+          <div><span class="meta-label">分类</span><span id="modalCategory">-</span></div>
+          <div><span class="meta-label">命中</span><span id="modalHitCount">-</span></div>
+          <div><span class="meta-label">最近</span><span id="modalLastCapturedAt">-</span></div>
+        </div>
+
+        <div class="modal-body">
+          <div id="modalImagePreviewBlock" class="image-block hidden">
+            <div class="image-frame modal-image-frame">
+              <img id="modalImage" alt="图片预览" />
+            </div>
+            <button id="openImagePathBtn" class="text-action">打开图片位置</button>
+            <div id="modalImagePath" class="minor-text break-all">-</div>
+          </div>
+
+          <textarea id="detailTextContent" rows="9" placeholder="文本内容"></textarea>
+          <textarea id="detailNote" rows="4" placeholder="备注"></textarea>
+          <div id="detailWindowTitle" class="minor-text break-all">-</div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="saveContentBtn" class="text-action">保存正文</button>
+          <button id="saveNoteBtn" class="text-action">保存备注</button>
+          <button id="moveToCommonBtn" class="text-action">加入常用</button>
+          <button id="moveToDailyBtn" class="text-action">移回每日</button>
+          <button id="deleteRecordBtn" class="text-action danger">删除</button>
+        </div>
+      </section>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
