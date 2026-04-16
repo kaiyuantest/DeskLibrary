@@ -107,11 +107,12 @@ function createTrayIcon() {
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1180,
-    height: 820,
-    minWidth: 860,
-    minHeight: 620,
-    backgroundColor: '#f3f4f6',
+    width: 860,
+    height: 620,
+    minWidth: 720,
+    minHeight: 520,
+    frame: false,
+    backgroundColor: '#e9edf5',
     show: false,
     autoHideMenuBar: true,
     webPreferences: {
@@ -738,6 +739,34 @@ function setupIpc() {
 
   ipcMain.handle('open-main-window', async () => {
     showWindow();
+    return { ok: true };
+  });
+
+  ipcMain.handle('window-minimize', async () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.minimize();
+    }
+    return { ok: true };
+  });
+
+  ipcMain.handle('window-toggle-maximize', async () => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false };
+    }
+
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+      return { ok: true, maximized: false };
+    }
+
+    mainWindow.maximize();
+    return { ok: true, maximized: true };
+  });
+
+  ipcMain.handle('window-close', async () => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.close();
+    }
     return { ok: true };
   });
 }

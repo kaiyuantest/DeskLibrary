@@ -8,96 +8,152 @@
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
-    <div class="app-shell">
-      <aside class="sidebar">
-        <div class="brand-mark" title="Click2Save">C</div>
-
-        <nav class="nav-rail">
-          <button id="dailyPageBtn" class="rail-btn active" title="每日内容">☰</button>
-          <button id="commonPageBtn" class="rail-btn" title="其它分类">★</button>
-          <button id="settingsPageBtn" class="rail-btn" title="设置">⚙</button>
-        </nav>
-
-        <div class="sidebar-bottom">
-          <button id="refreshBtn" class="rail-btn ghost" title="刷新">↻</button>
+    <div class="window-shell">
+      <header class="window-titlebar">
+        <div class="window-brand">
+          <div class="brand-mark" title="Click2Save">C</div>
+          <div class="window-brand-text">
+            <strong>Click2Save</strong>
+            <span>桌面收藏工作台</span>
+          </div>
         </div>
-      </aside>
+        <div class="window-drag-space"></div>
+        <div class="window-controls">
+          <button id="windowMinBtn" class="window-control-btn" title="最小化">─</button>
+          <button id="windowMaxBtn" class="window-control-btn" title="最大化">□</button>
+          <button id="windowCloseBtn" class="window-control-btn danger" title="关闭">×</button>
+        </div>
+      </header>
 
-      <main class="main-shell">
-        <header class="topbar">
-          <div>
-            <h1 id="pageTitle">每日内容</h1>
-            <p id="statusText">后台监听中</p>
+      <div class="app-shell">
+        <aside class="sidebar">
+          <div class="sidebar-brand">
+            <div class="sidebar-badge">Workboard</div>
+            <div class="sidebar-copy">
+              <h2>捕捉有价值的片段</h2>
+              <p>把每日临时信息变成可搜索、可回收、可沉淀的资料库。</p>
+            </div>
           </div>
-          <div class="topbar-actions">
-            <input id="dailySearchInput" class="search-input" type="text" placeholder="搜索内容 / 备注" />
-            <input id="dailyDatePicker" class="date-input" type="date" />
-            <div id="dailyFilterBar" class="filter-bar"></div>
+
+          <nav class="nav-rail">
+            <button id="dailyPageBtn" class="rail-btn active" title="每日内容">
+              <span class="rail-icon">☰</span>
+              <span class="rail-label">每日内容</span>
+            </button>
+            <button id="commonPageBtn" class="rail-btn" title="其它分类">
+              <span class="rail-icon">★</span>
+              <span class="rail-label">高频收藏</span>
+            </button>
+            <button id="settingsPageBtn" class="rail-btn" title="设置">
+              <span class="rail-icon">⚙</span>
+              <span class="rail-label">偏好设置</span>
+            </button>
+          </nav>
+
+          <div class="sidebar-bottom">
+            <button id="refreshBtn" class="rail-btn ghost" title="刷新">
+              <span class="rail-icon">↻</span>
+              <span class="rail-label">刷新快照</span>
+            </button>
           </div>
-        </header>
+        </aside>
 
-        <section id="dailyPage" class="page-view">
-          <section class="composer-inline">
-            <textarea id="newRecordDraft" rows="2" placeholder="快速记一条备忘..."></textarea>
-            <button id="createRecordBtn" class="icon-action primary" title="新增">＋</button>
-          </section>
-
-          <section class="section-head compact">
-            <span>每日内容</span>
-            <span id="dailyCount" class="count-chip">0</span>
-          </section>
-          <section id="recordsList" class="cards-grid"></section>
-          <div id="dailyPagination" class="pagination-bar"></div>
-        </section>
-
-        <section id="commonPage" class="page-view hidden">
-          <div class="other-grid">
-            <section class="panel minimalist-panel">
-              <div class="section-head">
-                <span>常用分类</span>
-                <span id="commonCount" class="count-chip">0</span>
-              </div>
-              <section id="commonRecordsList" class="cards-grid compact-grid"></section>
-            </section>
-
-            <section class="panel minimalist-panel">
-              <div class="section-head">
-                <span>今日高频</span>
-              </div>
-              <div id="topDailyList" class="quick-list"></div>
-            </section>
-
-            <section class="panel minimalist-panel">
-              <div class="section-head">
-                <span>最近命中</span>
-              </div>
-              <div id="recentDailyList" class="quick-list"></div>
-            </section>
-          </div>
-        </section>
-
-        <section id="settingsPage" class="page-view hidden">
-          <section class="panel minimalist-panel settings-panel">
-            <div class="settings-list">
-              <label class="setting-row"><span>自动判断</span><input id="autoJudgmentEnabled" type="checkbox" /></label>
-              <label class="setting-row"><span>Alt+Q</span><input id="altQEnabled" type="checkbox" /></label>
-              <label class="setting-row"><span>双复制</span><input id="doubleCopyEnabled" type="checkbox" /></label>
-              <label class="setting-row"><span>复制后按键</span><input id="copyThenKeyEnabled" type="checkbox" /></label>
-              <label class="setting-row"><span>开机启动</span><input id="startupLaunchEnabled" type="checkbox" /></label>
-              <label class="setting-row"><span>悬浮图标</span><input id="floatingIconEnabled" type="checkbox" /></label>
-              <label class="setting-row"><span>靠边显示</span><input id="dockToEdgeEnabled" type="checkbox" /></label>
+        <main class="main-shell">
+          <header class="topbar">
+            <div class="topbar-copy">
+              <div class="eyebrow">Content Console</div>
+              <h1 id="pageTitle">每日内容</h1>
+              <p id="statusText">后台监听中</p>
             </div>
 
-            <div class="settings-key-row">
-              <span>复制后按键</span>
-              <input id="postCopyKey" type="text" placeholder="Shift / Ctrl / Alt" />
-            </div>
+            <section class="control-deck">
+              <label class="control-card search-card">
+                <span class="control-label">快速搜索</span>
+                <input id="dailySearchInput" class="search-input" type="text" placeholder="搜索内容 / 备注 / 标题" />
+              </label>
 
-            <p class="settings-hint">开机启动在保存后生效，通常需要下次登录系统时验证。</p>
-            <button id="saveSettingsBtn" class="save-pill">保存</button>
-          </section>
-        </section>
-      </main>
+              <label class="control-card date-card">
+                <span class="control-label">日期筛选</span>
+                <input id="dailyDatePicker" class="date-input" type="date" />
+              </label>
+
+              <section class="control-card filter-card">
+                <div class="control-label">日期标签</div>
+                <div id="dailyFilterBar" class="filter-bar"></div>
+              </section>
+            </section>
+          </header>
+
+          <div class="page-stack">
+            <section id="dailyPage" class="page-view page-scroll">
+              <section class="composer-inline">
+                <textarea id="newRecordDraft" rows="2" placeholder="快速记一条备忘、命令或片段..." spellcheck="false"></textarea>
+                <button id="createRecordBtn" class="icon-action primary" title="新增">＋</button>
+              </section>
+
+              <section class="section-head compact">
+                <span>每日内容</span>
+                <span id="dailyCount" class="count-chip">0</span>
+              </section>
+              <section id="recordsList" class="cards-grid"></section>
+              <div id="dailyPagination" class="pagination-bar"></div>
+            </section>
+
+            <section id="commonPage" class="page-view page-scroll hidden">
+              <div class="other-grid">
+                <section class="panel minimalist-panel">
+                  <div class="section-head">
+                    <span>常用分类</span>
+                    <span id="commonCount" class="count-chip">0</span>
+                  </div>
+                  <section id="commonRecordsList" class="cards-grid compact-grid"></section>
+                </section>
+
+                <section class="panel minimalist-panel">
+                  <div class="section-head">
+                    <span>今日高频</span>
+                  </div>
+                  <div id="topDailyList" class="quick-list"></div>
+                </section>
+
+                <section class="panel minimalist-panel">
+                  <div class="section-head">
+                    <span>最近命中</span>
+                  </div>
+                  <div id="recentDailyList" class="quick-list"></div>
+                </section>
+              </div>
+            </section>
+
+            <section id="settingsPage" class="page-view page-scroll hidden">
+              <section class="panel minimalist-panel settings-panel">
+                <div class="section-head settings-head">
+                  <span>行为设置</span>
+                  <span class="count-chip">系统级</span>
+                </div>
+
+                <div class="settings-list">
+                  <label class="setting-row"><span>自动判断</span><input id="autoJudgmentEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>Alt+Q</span><input id="altQEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>双复制</span><input id="doubleCopyEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>复制后按键</span><input id="copyThenKeyEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>开机启动</span><input id="startupLaunchEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>悬浮图标</span><input id="floatingIconEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>靠边显示</span><input id="dockToEdgeEnabled" type="checkbox" /></label>
+                </div>
+
+                <div class="settings-key-row">
+                  <span>复制后按键</span>
+                  <input id="postCopyKey" type="text" placeholder="Shift / Ctrl / Alt" />
+                </div>
+
+                <p class="settings-hint">开机启动在保存后生效，通常需要下次登录系统时验证。</p>
+                <button id="saveSettingsBtn" class="save-pill">保存设置</button>
+              </section>
+            </section>
+          </div>
+        </main>
+      </div>
     </div>
 
     <div id="recordModal" class="modal hidden">

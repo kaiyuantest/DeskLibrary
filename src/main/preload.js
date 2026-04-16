@@ -12,5 +12,8 @@ contextBridge.exposeInMainWorld('click2save', {
   openImagePath: (imagePath) => ipcRenderer.invoke('open-image-path', imagePath),
   copyRecordContent: (id) => ipcRenderer.invoke('copy-record-content', id),
   openMainWindow: () => ipcRenderer.invoke('open-main-window'),
+  minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
+  toggleMaximizeWindow: () => ipcRenderer.invoke('window-toggle-maximize'),
+  closeWindow: () => ipcRenderer.invoke('window-close'),
   onSnapshot: (callback) => ipcRenderer.on('snapshot', (_, payload) => callback(payload))
 });

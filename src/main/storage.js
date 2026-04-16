@@ -46,6 +46,25 @@ class StorageService {
     fs.writeFileSync(file, JSON.stringify(value, null, 2), 'utf-8');
   }
 
+  formatLocalDate(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  normalizeRecordDates(record) {
+    const createdAt = record.createdAt ? new Date(record.createdAt) : new Date();
+    const updatedAt = record.updatedAt ? new Date(record.updatedAt) : createdAt;
+    const lastCapturedAt = record.lastCapturedAt ? new Date(record.lastCapturedAt) : updatedAt;
+    return {
+      ...record,
+      createdDate: this.formatLocalDate(createdAt),
+      updatedAt: updatedAt.toISOString(),
+      lastCapturedAt: lastCapturedAt.toISOString()
+    };
+  }
+
   getSettings() {
     return {
       autoJudgmentEnabled: true,
@@ -66,7 +85,7 @@ class StorageService {
   }
 
   getAllRecords() {
-    return this.readJson(this.recordsFile, []).sort((a, b) => {
+    return this.readJson(this.recordsFile, []).map((item) => this.normalizeRecordDates(item)).sort((a, b) => {
       const timeA = new Date(a.updatedAt || a.createdAt).getTime();
       const timeB = new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
@@ -108,7 +127,7 @@ class StorageService {
       windowTitle: source.windowTitle || '',
       editableNote: '',
       createdAt: now.toISOString(),
-      createdDate: now.toISOString().slice(0, 10),
+      createdDate: this.formatLocalDate(now),
       updatedAt: now.toISOString()
     };
 
@@ -182,18 +201,18 @@ class StorageService {
 
   shouldNotifyDuplicate(recordId) {
     const map = this.readJson(this.duplicateFile, {});
-    const today = new Date().toISOString().slice(0, 10);
+    const today = this.formatLocalDate(new Date());
     return map[String(recordId)] !== today;
   }
 
   markDuplicateNotified(recordId) {
     const map = this.readJson(this.duplicateFile, {});
-    map[String(recordId)] = new Date().toISOString().slice(0, 10);
+    map[String(recordId)] = this.formatLocalDate(new Date());
     this.writeJson(this.duplicateFile, map);
   }
 
   saveImage(buffer, date) {
-    const day = date.toISOString().slice(0, 10);
+    const day = this.formatLocalDate(date);
     const dayDir = path.join(this.imagesDir, day);
     fs.mkdirSync(dayDir, { recursive: true });
     const file = path.join(dayDir, `${crypto.randomUUID()}.png`);

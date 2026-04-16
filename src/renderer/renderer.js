@@ -16,6 +16,9 @@ const state = {
 const els = {
   pageTitle: document.getElementById('pageTitle'),
   statusText: document.getElementById('statusText'),
+  windowMinBtn: document.getElementById('windowMinBtn'),
+  windowMaxBtn: document.getElementById('windowMaxBtn'),
+  windowCloseBtn: document.getElementById('windowCloseBtn'),
   dailyPageBtn: document.getElementById('dailyPageBtn'),
   commonPageBtn: document.getElementById('commonPageBtn'),
   settingsPageBtn: document.getElementById('settingsPageBtn'),
@@ -124,6 +127,29 @@ function recordsForCurrentPage() {
   if (state.currentPage === 'common') return commonRecords();
   if (state.currentPage === 'settings') return [];
   return dailyRecords();
+}
+
+function formatDateKey(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildRecentDateFilters(records, days = 7) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const recentDays = [];
+  for (let index = 0; index < days; index += 1) {
+    const date = new Date(today);
+    date.setDate(today.getDate() - index);
+    recentDays.push(formatDateKey(date));
+  }
+
+  const recordDates = new Set((records || []).map((item) => item.createdDate).filter(Boolean));
+  const merged = recentDays.filter((item) => recordDates.has(item) || recentDays.includes(item));
+  return ['全部', ...merged];
 }
 
 function escapeHtml(value) {
@@ -374,7 +400,7 @@ function closeModal() {
 
 function applySnapshot(payload) {
   state.records = payload.records || [];
-  state.dateFilters = payload.dateFilters || ['全部'];
+  state.dateFilters = buildRecentDateFilters(state.records);
   state.settings = payload.settings || {};
   state.statusText = payload.statusText || '后台监听中';
 
@@ -412,6 +438,12 @@ function switchPage(page) {
 els.dailyPageBtn.addEventListener('click', () => switchPage('daily'));
 els.commonPageBtn.addEventListener('click', () => switchPage('common'));
 els.settingsPageBtn.addEventListener('click', () => switchPage('settings'));
+els.windowMinBtn.addEventListener('click', () => window.click2save.minimizeWindow());
+els.windowMaxBtn.addEventListener('click', async () => {
+  const result = await window.click2save.toggleMaximizeWindow();
+  els.windowMaxBtn.textContent = result && result.maximized ? '❐' : '□';
+});
+els.windowCloseBtn.addEventListener('click', () => window.click2save.closeWindow());
 
 els.refreshBtn.addEventListener('click', async () => {
   applySnapshot(await window.click2save.getInitialData());
