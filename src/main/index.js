@@ -36,6 +36,65 @@ let pressedKeys = {
   alt: false
 };
 
+function getLoginItemConfig(enabled) {
+  const base = {
+    openAtLogin: !!enabled,
+    openAsHidden: true
+  };
+
+  if (process.platform !== 'win32') {
+    return base;
+  }
+
+  if (app.isPackaged) {
+    return {
+      ...base,
+      path: process.execPath,
+      args: []
+    };
+  }
+
+  const entryFile = process.argv[1] ? path.resolve(process.argv[1]) : '';
+  return {
+    ...base,
+    path: process.execPath,
+    args: entryFile ? [entryFile] : []
+  };
+}
+
+function readStartupLaunchEnabled() {
+  try {
+    if (process.platform === 'win32') {
+      const config = getLoginItemConfig(false);
+      return !!app.getLoginItemSettings({
+        path: config.path,
+        args: config.args
+      }).openAtLogin;
+    }
+
+    return !!app.getLoginItemSettings().openAtLogin;
+  } catch {
+    return null;
+  }
+}
+
+function syncStartupSettingFromSystem() {
+  const openAtLogin = readStartupLaunchEnabled();
+  if (openAtLogin === null) {
+    return getSettings();
+  }
+
+  const current = getSettings();
+  if (!!current.startupLaunchEnabled === openAtLogin) {
+    return current;
+  }
+
+  return storage.saveSettings({
+    ...current,
+    startupLaunchEnabled: openAtLogin
+  });
+}
+
 function createTrayIcon() {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
@@ -522,11 +581,10 @@ function normalizeConfiguredKey(value) {
 
 function applySystemSettings(settings) {
   try {
-    app.setLoginItemSettings({
-      openAtLogin: !!settings.startupLaunchEnabled
-    });
+    app.setLoginItemSettings(getLoginItemConfig(settings.startupLaunchEnabled));
   } catch {}
 
+  syncStartupSettingFromSystem();
   syncFloatingWindowVisibility();
 }
 
@@ -686,6 +744,7 @@ function setupIpc() {
 
 app.whenReady().then(() => {
   storage = new StorageService(app.getPath('userData'));
+  syncStartupSettingFromSystem();
   setupIpc();
   createWindow();
   createFloatingWindow();

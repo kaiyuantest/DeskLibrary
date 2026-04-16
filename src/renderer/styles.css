@@ -366,6 +366,13 @@ input[type="text"] {
   max-width: 220px;
 }
 
+.settings-hint {
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .save-pill,
 .text-action {
   border: 1px solid var(--line);
