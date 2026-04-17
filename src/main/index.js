@@ -1,8 +1,10 @@
 const { execFileSync } = require('child_process');
 const { app, BrowserWindow, Tray, Menu, globalShortcut, clipboard, nativeImage, ipcMain, Notification, shell, screen, dialog } = require('electron');
+const fs = require('fs');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { StorageService } = require('./storage');
+const { getDefaultSelfBuiltRoot, normalizeSelfBuiltRoot, openBrowserCard, runPythonBridge, scanBrowserCards } = require('./browser-import');
 let uIOhook = null;
 try {
   const hookModule = require('uiohook-napi');
@@ -34,6 +36,7 @@ const MAIN_WINDOW_SLIDE_STEP = 20;
 const MAIN_WINDOW_SLIDE_INTERVAL_MS = 10;
 const MAIN_WINDOW_HIDE_DELAY_MS = 220;
 const HOVER_SYNC_INTERVAL_MS = 120;
+const ACTIVE_WINDOW_HELPER_PATH = path.join(__dirname, 'bin', 'ActiveWindowInfo.exe');
 
 let mainWindow = null;
 let floatingWindow = null;
@@ -48,6 +51,7 @@ let observeContext = null;
 let altQFlowActive = false;
 let suppressedPollingSignature = '';
 let suppressedPollingUntil = 0;
+let lastShortcutSourceContext = null;
 let pressedKeys = {
   shift: false,
   ctrl: false,
@@ -790,16 +794,35 @@ function sendFloatingMenuState() {
   });
 }
 
-function getForegroundWindowContext() {
-  if (process.platform !== 'win32') {
-    return {
-      sourceApp: '未知应用',
-      windowTitle: '未获取到窗口标题'
-    };
+function execForegroundProbe(command, args, parser) {
+  try {
+    const output = execFileSync(command, args, {
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 1200
+    }).trim();
+    return parser(output);
+  } catch {
+    return null;
   }
+}
 
+function readForegroundWindowViaHelper() {
+  if (process.platform !== 'win32') return null;
+  if (!fs.existsSync(ACTIVE_WINDOW_HELPER_PATH)) return null;
+  return execForegroundProbe(ACTIVE_WINDOW_HELPER_PATH, [], (output) => {
+    if (!output) return null;
+    const [processName = '', ...titleParts] = String(output).split('|');
+    return {
+      processName: processName.trim(),
+      processPath: '',
+      title: titleParts.join('|').trim()
+    };
+  });
+}
+
+function readForegroundWindowViaPowerShell() {
   const script = [
-    '$ErrorActionPreference = "Stop"',
     'Add-Type @\'',
     'using System;',
     'using System.Runtime.InteropServices;',
@@ -811,50 +834,97 @@ function getForegroundWindowContext() {
     '}',
     '\'@',
     '$hwnd = [Click2SaveNative]::GetForegroundWindow()',
+    'if ($hwnd -eq [IntPtr]::Zero) { return }',
     '$titleBuilder = New-Object System.Text.StringBuilder 1024',
     '[void][Click2SaveNative]::GetWindowText($hwnd, $titleBuilder, $titleBuilder.Capacity)',
     '$pid = 0',
     '[void][Click2SaveNative]::GetWindowThreadProcessId($hwnd, [ref]$pid)',
     '$process = Get-Process -Id $pid -ErrorAction SilentlyContinue',
+    '$processName = ""',
+    '$processPath = ""',
+    'if ($process) {',
+    '  try { $processName = [string]$process.ProcessName } catch {}',
+    '  try { $processPath = [string]$process.Path } catch {}',
+    '  if (-not $processPath) {',
+    '    try { $processPath = [string]$process.MainModule.FileName } catch {}',
+    '  }',
+    '}',
     '[pscustomobject]@{',
-    '  title = $titleBuilder.ToString()',
-    '  processName = if ($process) { $process.ProcessName } else { "" }',
-    '  processPath = if ($process) { $process.Path } else { "" }',
+    '  title = [string]$titleBuilder.ToString()',
+    '  processName = $processName',
+    '  processPath = $processPath',
+    '  pid = [int]$pid',
     '} | ConvertTo-Json -Compress'
   ].join('\n');
 
-  try {
-    const output = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
-      windowsHide: true,
-      encoding: 'utf8',
-      timeout: 1200
-    }).trim();
-    const payload = output ? JSON.parse(output) : {};
-    return {
-      sourceApp: normalizeSourceAppName(payload.processName, payload.processPath),
-      windowTitle: String(payload.title || '').trim() || '未获取到窗口标题'
-    };
-  } catch {
+  return execForegroundProbe('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], (output) => {
+    if (!output) return null;
+    return JSON.parse(output);
+  });
+}
+
+function readForegroundWindowViaPidOnly() {
+  const script = [
+    'Add-Type @\'',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'public static class Click2SavePidOnly {',
+    '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
+    '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);',
+    '}',
+    '\'@',
+    '$hwnd = [Click2SavePidOnly]::GetForegroundWindow()',
+    'if ($hwnd -eq [IntPtr]::Zero) { return }',
+    '$pid = 0',
+    '[void][Click2SavePidOnly]::GetWindowThreadProcessId($hwnd, [ref]$pid)',
+    '$process = Get-Process -Id $pid -ErrorAction SilentlyContinue',
+    '[pscustomobject]@{',
+    '  processName = if ($process) { [string]$process.ProcessName } else { "" }',
+    '  processPath = ""',
+    '  title = ""',
+    '  pid = [int]$pid',
+    '} | ConvertTo-Json -Compress'
+  ].join('\n');
+
+  return execForegroundProbe('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], (output) => {
+    if (!output) return null;
+    return JSON.parse(output);
+  });
+}
+
+function getForegroundWindowContext() {
+  if (process.platform !== 'win32') {
     return {
       sourceApp: '未知应用',
       windowTitle: '未获取到窗口标题'
     };
   }
+
+  const payload = readForegroundWindowViaHelper()
+    || readForegroundWindowViaPowerShell()
+    || readForegroundWindowViaPidOnly()
+    || {};
+
+  return {
+    sourceApp: normalizeSourceAppName(payload.processName, payload.processPath),
+    windowTitle: String(payload.title || '').trim() || '未获取到窗口标题'
+  };
 }
 
 function normalizeSourceAppName(processName = '', processPath = '') {
   const rawName = String(processName || '').trim();
   const lowerName = rawName.toLowerCase();
   const fileName = path.basename(String(processPath || '').trim() || rawName).toLowerCase();
+  const identity = `${lowerName}|${fileName}`;
 
-  if (lowerName === 'wechat' || fileName === 'wechat.exe') return '微信';
-  if (lowerName === 'qq' || fileName === 'qq.exe') return 'QQ';
-  if (lowerName === 'chrome' || fileName === 'chrome.exe') return 'Google Chrome';
-  if (lowerName === 'msedge' || fileName === 'msedge.exe') return 'Microsoft Edge';
-  if (lowerName === 'firefox' || fileName === 'firefox.exe') return 'Firefox';
-  if (lowerName === 'explorer' || fileName === 'explorer.exe') return '资源管理器';
-  if (lowerName === 'code' || fileName === 'code.exe') return 'Visual Studio Code';
-  if (lowerName === 'powershell' || fileName === 'powershell.exe' || fileName === 'pwsh.exe') return 'PowerShell';
+  if (identity.includes('weixin') || identity.includes('wechat')) return '微信';
+  if (identity.includes('qq')) return 'QQ';
+  if (identity.includes('chrome')) return 'Google Chrome';
+  if (identity.includes('msedge')) return 'Microsoft Edge';
+  if (identity.includes('firefox')) return 'Firefox';
+  if (identity.includes('explorer')) return '资源管理器';
+  if (identity.includes('code')) return 'Visual Studio Code';
+  if (identity.includes('powershell') || identity.includes('pwsh')) return 'PowerShell';
   return rawName || '未知应用';
 }
 
@@ -905,6 +975,28 @@ function normalizeAsset(asset) {
   };
 }
 
+function normalizeBrowserCard(card) {
+  return {
+    ...card,
+    nameDisplay: card.name || String(card.domain || '').replace(/^\.+/, '') || '未命名卡片',
+    domainDisplay: String(card.domain || '').replace(/^\.+/, '') || 'unknown',
+    sourceTypeDisplay: card.sourceType === 'chrome_profile'
+      ? '系统 Chrome'
+      : card.sourceType === 'self_built'
+        ? '自建浏览器'
+        : card.sourceType === 'bitbrowser'
+          ? '比特浏览器'
+        : '未知来源',
+    cookiePreview: Array.isArray(card.cookieNames) ? card.cookieNames.slice(0, 8).join(', ') : '',
+    lastUsedMethodDisplay: {
+      inject: '注入',
+      db_write: 'DB写入',
+      default_open: '默认打开'
+    }[card.last_used_method] || '',
+    updatedAtDisplay: new Date(card.updatedAt || card.createdAt || Date.now()).toLocaleString('zh-CN', { hour12: false })
+  };
+}
+
 function defaultStatusText() {
   if (accumulationSession && accumulationSession.active) {
     return `累计复制中，已收集 ${accumulationSession.segmentCount || 0} 段`;
@@ -915,13 +1007,26 @@ function defaultStatusText() {
   return '后台监听中';
 }
 
+function getPythonBridgeConfig(projectPathOverride = '') {
+  const settings = getSettings();
+  return {
+    projectPath: projectPathOverride || settings.pythonCookieProjectPath,
+    cfg: {
+      bit_api_url: settings.bitApiUrl || 'http://127.0.0.1:54345',
+      bit_api_token: settings.bitApiToken || ''
+    }
+  };
+}
+
 function sendSnapshot(statusText) {
   if (!mainWindow || mainWindow.webContents.isDestroyed()) return;
   const records = storage.getAllRecords().map(normalizeRecord);
   const assets = storage.getAllAssets().map(normalizeAsset);
+  const browserCards = storage.getAllBrowserCards().map(normalizeBrowserCard);
   mainWindow.webContents.send('snapshot', {
     records,
     assets,
+    browserCards,
     dateFilters: storage.getDateFilters(),
     categoryFilters: storage.getCategoryFilters(),
     settings: getSettings(),
@@ -966,8 +1071,11 @@ function processPayload(payload, method, statusLabel, options = {}) {
   const duplicate = storage.findDuplicate(payload);
   if (duplicate) {
     const isExplicitCapture = method !== 'auto';
+    const nextUpdates = {
+      sourceApp: sourceContext.sourceApp || duplicate.sourceApp || '',
+      windowTitle: sourceContext.windowTitle || duplicate.windowTitle || ''
+    };
     if (category === 'common' || isExplicitCapture) {
-      const nextUpdates = {};
       if (category === 'common' && (duplicate.category || 'daily') !== 'common') {
         nextUpdates.category = 'common';
       }
@@ -977,8 +1085,11 @@ function processPayload(payload, method, statusLabel, options = {}) {
       return;
     }
     if (storage.shouldNotifyDuplicate(duplicate.id)) {
+      storage.touchRecord(duplicate.id, nextUpdates);
       storage.markDuplicateNotified(duplicate.id);
       notify('Click2Save', '内容已存在');
+    } else {
+      storage.touchRecord(duplicate.id, nextUpdates);
     }
     sendSnapshot('检测到重复内容');
     return;
@@ -1199,7 +1310,8 @@ function createObserveContext(source) {
   return {
     source,
     copyActionCount: source === 'copy_shortcut' ? 1 : 0,
-    startedAt: Date.now()
+    startedAt: Date.now(),
+    sourceContext: source === 'copy_shortcut' ? (lastShortcutSourceContext || getForegroundWindowContext()) : getForegroundWindowContext()
   };
 }
 
@@ -1227,10 +1339,13 @@ function stopObserving() {
   }
 }
 
-function startObserving(payload, source = 'clipboard_poll') {
+function startObserving(payload, source = 'clipboard_poll', sourceContext = null) {
   pendingPayload = payload;
   observing = true;
   observeContext = createObserveContext(source);
+  if (sourceContext) {
+    observeContext.sourceContext = sourceContext;
+  }
 
   const settings = getSettings();
   if (shouldPromoteToCommonNow()) {
@@ -1243,7 +1358,7 @@ function startObserving(payload, source = 'clipboard_poll') {
   if (settings.copyThenKeyEnabled && shouldTriggerPostCopyCaptureNow()) {
     const current = pendingPayload;
     stopObserving();
-    processPayload(current, 'copy_then_key', '复制后按键已收藏');
+    processPayload(current, 'copy_then_key', '复制后按键已收藏', { sourceContext: observeContext?.sourceContext });
     return;
   }
 
@@ -1267,7 +1382,7 @@ function startObserving(payload, source = 'clipboard_poll') {
     const keywordList = ['需求','待办','方案','结论','报错','异常','修复','客户反馈','会议','纪要','优化','requirement','todo','plan','solution','conclusion','error','exception','fix','feedback','meeting','minutes','optimize'];
     const matched = text.length >= 12 || /\r?\n/.test(text) || /https?:\/\//i.test(text) || keywordList.some((item) => text.toLowerCase().includes(item.toLowerCase()));
     if (matched) {
-      processPayload(current, 'auto', '自动判断已收藏');
+      processPayload(current, 'auto', '自动判断已收藏', { sourceContext: observeContext?.sourceContext });
     } else {
       sendSnapshot('自动判断未命中');
     }
@@ -1275,7 +1390,7 @@ function startObserving(payload, source = 'clipboard_poll') {
   sendSnapshot(currentObserveStatusText());
 }
 
-function handleClipboardChanged(payload, source = 'clipboard_poll') {
+function handleClipboardChanged(payload, source = 'clipboard_poll', sourceContext = null) {
   if (altQFlowActive) return;
   const settings = getSettings();
 
@@ -1291,15 +1406,16 @@ function handleClipboardChanged(payload, source = 'clipboard_poll') {
 
   if (observing && settings.doubleCopyEnabled && observeContext && observeContext.source === 'copy_shortcut' && observeContext.copyActionCount >= 2) {
     const current = payload;
+    const captureSourceContext = sourceContext || observeContext.sourceContext;
     stopObserving();
-    processPayload(current, 'double_copy', '累计复制已收藏');
+    processPayload(current, 'double_copy', '累计复制已收藏', { sourceContext: captureSourceContext });
     return;
   }
 
-  startObserving(payload, source);
+  startObserving(payload, source, sourceContext);
 }
 
-function handleCopyShortcutAction(payload) {
+function handleCopyShortcutAction(payload, sourceContext = null) {
   if (!payload) {
     sendSnapshot('等待复制内容写入剪贴板');
     return;
@@ -1307,31 +1423,31 @@ function handleCopyShortcutAction(payload) {
 
   lastClipboardSignature = payload.signature;
   markPollingSuppressed(payload.signature);
-  handleClipboardChanged(payload, 'copy_shortcut');
+  handleClipboardChanged(payload, 'copy_shortcut', sourceContext || lastShortcutSourceContext || getForegroundWindowContext());
 }
 
-function scheduleCopyShortcutRead(attempt = 0, previousSignature = lastClipboardSignature) {
+function scheduleCopyShortcutRead(attempt = 0, previousSignature = lastClipboardSignature, sourceContext = lastShortcutSourceContext || getForegroundWindowContext()) {
   setTimeout(() => {
     const payload = readClipboardPayload();
     const imagePending = clipboardHasImageFormat();
 
     if (payload && payload.contentType === 'image') {
-      handleCopyShortcutAction(payload);
+      handleCopyShortcutAction(payload, sourceContext);
       return;
     }
 
     if (payload && payload.signature !== previousSignature) {
-      handleCopyShortcutAction(payload);
+      handleCopyShortcutAction(payload, sourceContext);
       return;
     }
 
     if (payload && attempt >= 3 && !imagePending) {
-      handleCopyShortcutAction(payload);
+      handleCopyShortcutAction(payload, sourceContext);
       return;
     }
 
     if (attempt < COPY_SHORTCUT_MAX_RETRIES) {
-      scheduleCopyShortcutRead(attempt + 1, previousSignature);
+      scheduleCopyShortcutRead(attempt + 1, previousSignature, sourceContext);
       return;
     }
 
@@ -1396,9 +1512,10 @@ function setupGlobalShortcuts() {
     if (!settings.altQEnabled) return;
     altQFlowActive = true;
     ignoreNextClipboardChange = true;
+    const sourceContext = getForegroundWindowContext();
     const payload = readClipboardPayload();
     if (payload) {
-      processPayload(payload, 'hotkey_alt_q', 'Alt+Q 已收藏');
+      processPayload(payload, 'hotkey_alt_q', 'Alt+Q 已收藏', { sourceContext });
     }
     setTimeout(() => {
       altQFlowActive = false;
@@ -1510,7 +1627,8 @@ function setupKeyboardListener() {
       updateModifierState(event, true);
 
       if (isCopyShortcut(event)) {
-        scheduleCopyShortcutRead();
+        lastShortcutSourceContext = getForegroundWindowContext();
+        scheduleCopyShortcutRead(0, lastClipboardSignature, lastShortcutSourceContext);
         return;
       }
 
@@ -1521,8 +1639,9 @@ function setupKeyboardListener() {
 
       if (event.keycode === 56 || event.keycode === 3640) {
         const current = pendingPayload;
+        const sourceContext = observeContext?.sourceContext;
         stopObserving();
-        processPayload(current, 'copy_then_key', '已收藏到常用', { category: 'common' });
+        processPayload(current, 'copy_then_key', '已收藏到常用', { category: 'common', sourceContext });
         return;
       }
 
@@ -1554,6 +1673,7 @@ function setupIpc() {
   ipcMain.handle('get-initial-data', async () => ({
     records: storage.getAllRecords().map(normalizeRecord),
     assets: storage.getAllAssets().map(normalizeAsset),
+    browserCards: storage.getAllBrowserCards().map(normalizeBrowserCard),
     dateFilters: storage.getDateFilters(),
     categoryFilters: storage.getCategoryFilters(),
     settings: getSettings(),
@@ -1667,6 +1787,175 @@ function setupIpc() {
       sendSnapshot(message);
       return { ok: false, message };
     }
+  });
+
+  ipcMain.handle('scan-browser-cards', async (_, payload = {}) => {
+    try {
+      const scope = payload.scope === 'chrome' || payload.scope === 'self_built' ? payload.scope : 'all';
+      const selfBuiltRoot = normalizeSelfBuiltRoot(payload.selfBuiltRoot || getSettings().browserScanRoot || getDefaultSelfBuiltRoot());
+      if ((getSettings().browserScanRoot || '') !== selfBuiltRoot) {
+        storage.saveSettings({
+          ...getSettings(),
+          browserScanRoot: selfBuiltRoot
+        });
+      }
+
+      const result = await scanBrowserCards({
+        scope,
+        selfBuiltRoot
+      });
+
+      return {
+        ok: true,
+        candidates: Array.isArray(result.candidates) ? result.candidates : [],
+        results: Array.isArray(result.results) ? result.results : [],
+        selfBuiltRoot: result.selfBuiltRoot || selfBuiltRoot
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '扫描失败'
+      };
+    }
+  });
+
+  ipcMain.handle('get-browser-import-sources', async (_, payload = {}) => {
+    try {
+      const projectPath = String(payload.projectPath || '').trim();
+      if (projectPath && projectPath !== getSettings().pythonCookieProjectPath) {
+        storage.saveSettings({
+          ...getSettings(),
+          pythonCookieProjectPath: projectPath
+        });
+      }
+      const result = await runPythonBridge('list-offline-sources', getPythonBridgeConfig(projectPath));
+      return {
+        ok: true,
+        results: result.results || {}
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '获取来源失败'
+      };
+    }
+  });
+
+  ipcMain.handle('load-browser-import-groups', async (_, payload = {}) => {
+    try {
+      const projectPath = String(payload.projectPath || '').trim();
+      if (projectPath && projectPath !== getSettings().pythonCookieProjectPath) {
+        storage.saveSettings({
+          ...getSettings(),
+          pythonCookieProjectPath: projectPath
+        });
+      }
+      const result = await runPythonBridge('load-offline-groups', {
+        ...getPythonBridgeConfig(projectPath),
+        sourceType: payload.sourceType || '',
+        sourceId: payload.sourceId || '',
+        filterAuth: payload.filterAuth !== false,
+        mergeDomain: payload.mergeDomain !== false
+      });
+      return {
+        ok: true,
+        results: Array.isArray(result.results) ? result.results : []
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '加载 Cookie 失败'
+      };
+    }
+  });
+
+  ipcMain.handle('build-browser-import-cards', async (_, payload = {}) => {
+    try {
+      const projectPath = String(payload.projectPath || '').trim();
+      const result = await runPythonBridge('build-import-cards', {
+        ...getPythonBridgeConfig(projectPath),
+        sourceType: payload.sourceType || '',
+        sourceId: payload.sourceId || '',
+        domainsJson: JSON.stringify(Array.isArray(payload.groups) ? payload.groups : [])
+      });
+      return {
+        ok: true,
+        results: Array.isArray(result.results) ? result.results : []
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '构建导入卡片失败'
+      };
+    }
+  });
+
+  ipcMain.handle('import-browser-cards', async (_, payload = {}) => {
+    try {
+      const cards = Array.isArray(payload.cards) ? payload.cards : [];
+      const imported = storage.importBrowserCards(cards);
+      sendSnapshot(imported.length ? '浏览器卡片已导入' : '没有可导入的新卡片');
+      return { ok: true, count: imported.length };
+    } catch (error) {
+      const message = error && error.message ? error.message : '导入失败';
+      sendSnapshot(message);
+      return { ok: false, message };
+    }
+  });
+
+  ipcMain.handle('update-browser-card', async (_, payload = {}) => {
+    const result = storage.updateBrowserCard(payload.id, {
+      remark: payload.remark || '',
+      openUrl: payload.openUrl || ''
+    });
+    sendSnapshot('浏览器卡片已保存');
+    return { ok: !!result };
+  });
+
+  ipcMain.handle('open-browser-card', async (_, id) => {
+    try {
+      const card = storage.getAllBrowserCards().find((item) => item.id === id);
+      if (!card) {
+        return { ok: false, message: '浏览器卡片不存在' };
+      }
+      let result;
+      try {
+        result = await runPythonBridge('default-open', {
+          ...getPythonBridgeConfig(),
+          cardJson: JSON.stringify(card)
+        });
+      } catch {
+        result = openBrowserCard(card);
+      }
+      if (result.ok) {
+        storage.updateBrowserCard(id, {
+          last_used_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+          last_used_method: 'default_open'
+        });
+        sendSnapshot('浏览器卡片已打开');
+      }
+      return result;
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '打开失败'
+      };
+    }
+  });
+
+  ipcMain.handle('open-browser-card-source', async (_, id) => {
+    const card = storage.getAllBrowserCards().find((item) => item.id === id);
+    if (!card) return { ok: false, message: '浏览器卡片不存在' };
+    const userDataDir = card.browserSource?.userDataDir;
+    if (!userDataDir) return { ok: false, message: '来源目录不存在' };
+    shell.showItemInFolder(userDataDir);
+    return { ok: true };
+  });
+
+  ipcMain.handle('delete-browser-card', async (_, id) => {
+    const ok = storage.deleteBrowserCard(id);
+    sendSnapshot(ok ? '浏览器卡片已删除' : '删除失败');
+    return { ok };
   });
 
   ipcMain.handle('update-asset-note', async (_, payload = {}) => {

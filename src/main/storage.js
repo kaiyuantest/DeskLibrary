@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { DEFAULT_PYTHON_COOKIE_PROJECT } = require('./browser-import');
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg']);
 
 class StorageService {
@@ -11,6 +12,7 @@ class StorageService {
     this.assetsDir = path.join(this.dataDir, 'assets-backups');
     this.recordsFile = path.join(this.dataDir, 'records.json');
     this.assetsFile = path.join(this.dataDir, 'assets.json');
+    this.browserCardsFile = path.join(this.dataDir, 'browserCards.json');
     this.settingsFile = path.join(this.dataDir, 'settings.json');
     this.duplicateFile = path.join(this.dataDir, 'duplicate-notices.json');
 
@@ -19,6 +21,7 @@ class StorageService {
 
     this.ensureFile(this.recordsFile, []);
     this.ensureFile(this.assetsFile, []);
+    this.ensureFile(this.browserCardsFile, []);
     this.ensureFile(this.settingsFile, {
       autoJudgmentEnabled: true,
       altQEnabled: true,
@@ -34,7 +37,11 @@ class StorageService {
       dockToEdgeEnabled: true,
       floatingOffsetX: null,
       floatingDockSide: 'right',
-      floatingOffsetY: null
+      floatingOffsetY: null,
+      browserScanRoot: '',
+      pythonCookieProjectPath: DEFAULT_PYTHON_COOKIE_PROJECT,
+      bitApiUrl: 'http://127.0.0.1:54345',
+      bitApiToken: ''
     });
     this.ensureFile(this.duplicateFile, {});
   }
@@ -98,6 +105,52 @@ class StorageService {
     };
   }
 
+  normalizeBrowserCard(card) {
+    const createdAt = card.createdAt ? new Date(card.createdAt) : new Date();
+    const updatedAt = card.updatedAt ? new Date(card.updatedAt) : createdAt;
+    const browserSource = card.browserSource || {};
+    const domain = String(card.domain || '').trim() || '.unknown';
+    const openUrl = String(card.openUrl || card.open_url || '').trim() || `https://${domain.replace(/^\.+/, '')}`;
+    const cookies = Array.isArray(card.cookies) ? card.cookies : [];
+    const cookieNames = Array.isArray(card.cookieNames) ? card.cookieNames : cookies.map((item) => item.name).filter(Boolean);
+
+    return {
+      ...card,
+      name: card.name || domain.replace(/^\.+/, '') || '未命名卡片',
+      domain,
+      openUrl,
+      open_url: openUrl,
+      url: card.url || `https://${domain.replace(/^\.+/, '')}`,
+      cookies,
+      cookieNames,
+      cookieCount: Number(card.cookieCount || cookies.length || 0),
+      remark: card.remark || '',
+      username: card.username || '',
+      password: card.password || '',
+      saved_at: card.saved_at || createdAt.toISOString(),
+      last_used_at: card.last_used_at || '',
+      last_used_method: card.last_used_method || '',
+      test_title: card.test_title || '',
+      test_ok: typeof card.test_ok === 'boolean' ? card.test_ok : null,
+      browserSource,
+      sourceType: browserSource.type || 'unknown',
+      sourceLabel: browserSource.label || browserSource.displayName || browserSource.name || '未知来源',
+      sourceKey: this.getBrowserSourceKey(browserSource),
+      createdAt: createdAt.toISOString(),
+      updatedAt: updatedAt.toISOString()
+    };
+  }
+
+  getBrowserSourceKey(browserSource = {}) {
+    if (browserSource.type === 'chrome_profile') {
+      return `chrome_profile:${browserSource.userDataDir || ''}:${browserSource.profileName || ''}`;
+    }
+    if (browserSource.type === 'self_built') {
+      return `self_built:${browserSource.userDataDir || ''}`;
+    }
+    return `${browserSource.type || 'unknown'}:${browserSource.name || browserSource.displayName || ''}`;
+  }
+
   getSettings() {
     return {
       autoJudgmentEnabled: true,
@@ -115,6 +168,10 @@ class StorageService {
       floatingOffsetX: null,
       floatingDockSide: 'right',
       floatingOffsetY: null,
+      browserScanRoot: '',
+      pythonCookieProjectPath: DEFAULT_PYTHON_COOKIE_PROJECT,
+      bitApiUrl: 'http://127.0.0.1:54345',
+      bitApiToken: '',
       ...this.readJson(this.settingsFile, {})
     };
   }
@@ -134,6 +191,14 @@ class StorageService {
 
   getAllAssets() {
     return this.readJson(this.assetsFile, []).map((item) => this.normalizeAsset(item)).sort((a, b) => {
+      const timeA = new Date(a.updatedAt || a.createdAt).getTime();
+      const timeB = new Date(b.updatedAt || b.createdAt).getTime();
+      return timeB - timeA;
+    });
+  }
+
+  getAllBrowserCards() {
+    return this.readJson(this.browserCardsFile, []).map((item) => this.normalizeBrowserCard(item)).sort((a, b) => {
       const timeA = new Date(a.updatedAt || a.createdAt).getTime();
       const timeB = new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
@@ -242,6 +307,53 @@ class StorageService {
     return nextAsset;
   }
 
+  updateBrowserCard(cardId, updates) {
+    const cards = this.getAllBrowserCards();
+    const index = cards.findIndex((item) => item.id === cardId);
+    if (index === -1) return null;
+    const nextCard = this.normalizeBrowserCard({
+      ...cards[index],
+      ...updates,
+      updatedAt: new Date().toISOString()
+    });
+    cards[index] = nextCard;
+    this.writeJson(this.browserCardsFile, cards);
+    return nextCard;
+  }
+
+  importBrowserCards(cards = []) {
+    const existing = this.getAllBrowserCards();
+    const imported = [];
+
+    for (const incoming of cards) {
+      const normalized = this.normalizeBrowserCard({
+        ...incoming,
+        id: incoming.id || crypto.randomUUID().slice(0, 8),
+        createdAt: incoming.createdAt || new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      });
+      const existingIndex = existing.findIndex((item) => item.domain === normalized.domain && item.sourceKey === normalized.sourceKey);
+
+      if (existingIndex >= 0) {
+        existing[existingIndex] = this.normalizeBrowserCard({
+          ...existing[existingIndex],
+          ...normalized,
+          id: existing[existingIndex].id,
+          remark: existing[existingIndex].remark || normalized.remark || '',
+          createdAt: existing[existingIndex].createdAt,
+          updatedAt: new Date().toISOString()
+        });
+        imported.push(existing[existingIndex]);
+      } else {
+        existing.unshift(normalized);
+        imported.push(normalized);
+      }
+    }
+
+    this.writeJson(this.browserCardsFile, existing);
+    return imported;
+  }
+
   importAssets(entries = [], mode = 'link') {
     const assets = this.getAllAssets();
     const imported = [];
@@ -320,6 +432,14 @@ class StorageService {
     }
 
     this.writeJson(this.assetsFile, assets.filter((item) => item.id !== assetId));
+    return true;
+  }
+
+  deleteBrowserCard(cardId) {
+    const cards = this.getAllBrowserCards();
+    const target = cards.find((item) => item.id === cardId);
+    if (!target) return false;
+    this.writeJson(this.browserCardsFile, cards.filter((item) => item.id !== cardId));
     return true;
   }
 
