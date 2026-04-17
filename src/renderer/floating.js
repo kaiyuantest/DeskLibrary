@@ -3,16 +3,6 @@ let dragging = false;
 let moved = false;
 let startPoint = null;
 
-button.addEventListener('mouseenter', async () => {
-  await window.click2saveFloating.setHovered(true);
-});
-
-button.addEventListener('mouseleave', async () => {
-  if (!dragging) {
-    await window.click2saveFloating.setHovered(false);
-  }
-});
-
 button.addEventListener('mousedown', async (event) => {
   dragging = true;
   moved = false;

@@ -15,10 +15,20 @@ const COPY_SHORTCUT_POLL_DELAY_MS = 120;
 const COPY_SHORTCUT_MAX_RETRIES = 15;
 const SHORTCUT_POLL_SUPPRESS_MS = 1000;
 const FLOATING_WINDOW_SIZE = 56;
-const FLOATING_WINDOW_MARGIN = 12;
+const FLOATING_WINDOW_MARGIN = 6;
 const FLOATING_VISIBLE_SLIVER = 16;
 const FLOATING_SLIDE_STEP = 8;
 const FLOATING_SLIDE_INTERVAL_MS = 10;
+const FLOATING_HIDE_DELAY_MS = 180;
+const FLOATING_EDGE_TRIGGER_SIZE = 18;
+const MAIN_WINDOW_DOCK_THRESHOLD = 56;
+const MAIN_WINDOW_VISIBLE_SLIVER = 2;
+const MAIN_WINDOW_HIDDEN_OVERDRAW = 14;
+const MAIN_WINDOW_EDGE_TRIGGER_SIZE = 18;
+const MAIN_WINDOW_SLIDE_STEP = 20;
+const MAIN_WINDOW_SLIDE_INTERVAL_MS = 10;
+const MAIN_WINDOW_HIDE_DELAY_MS = 220;
+const HOVER_SYNC_INTERVAL_MS = 120;
 
 let mainWindow = null;
 let floatingWindow = null;
@@ -43,6 +53,13 @@ let floatingDragState = null;
 let floatingHovered = false;
 let floatingPinnedVisible = false;
 let floatingBoundsCache = null;
+let floatingHideTimer = null;
+let mainWindowHovered = false;
+let mainWindowSlideTimer = null;
+let mainWindowDockMode = 'visible';
+let mainWindowDockCache = null;
+let mainWindowHideTimer = null;
+let hoverSyncTimer = null;
 
 function getLoginItemConfig(enabled) {
   const base = {
@@ -136,9 +153,35 @@ function createWindow() {
       mainWindow.setSkipTaskbar(true);
     }
   });
+  mainWindow.on('move', () => {
+    if (mainWindowSlideTimer || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMaximized()) {
+      return;
+    }
+    if (mainWindowDockMode === 'visible') {
+      updateMainWindowDockCache();
+    }
+  });
+  mainWindow.on('resize', () => {
+    if (mainWindowSlideTimer || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMaximized()) {
+      return;
+    }
+    if (mainWindowDockMode === 'visible') {
+      updateMainWindowDockCache();
+    }
+  });
+  mainWindow.on('maximize', () => {
+    stopMainWindowAnimation();
+    mainWindowDockMode = 'visible';
+  });
+  mainWindow.on('unmaximize', () => {
+    updateMainWindowDockCache();
+    syncMainWindowDockVisibility();
+  });
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
+      clearMainWindowHideTimer();
+      stopMainWindowAnimation();
       mainWindow.setSkipTaskbar(true);
       mainWindow.hide();
     }
@@ -185,40 +228,111 @@ function stopFloatingAnimation() {
   }
 }
 
-function animateFloatingWindow(mode = 'hidden') {
-  if (!floatingWindow || floatingWindow.isDestroyed()) return;
-  stopFloatingAnimation();
-  const target = getFloatingBounds(mode);
-  const current = floatingWindow.getBounds();
-  if (current.x === target.x && current.y === target.y) {
-    floatingBoundsCache = target;
+function clearFloatingHideTimer() {
+  if (floatingHideTimer) {
+    clearTimeout(floatingHideTimer);
+    floatingHideTimer = null;
+  }
+}
+
+function clearMainWindowHideTimer() {
+  if (mainWindowHideTimer) {
+    clearTimeout(mainWindowHideTimer);
+    mainWindowHideTimer = null;
+  }
+}
+
+function isPointInsideBounds(point, bounds) {
+  if (!point || !bounds) return false;
+  return point.x >= bounds.x
+    && point.x < bounds.x + bounds.width
+    && point.y >= bounds.y
+    && point.y < bounds.y + bounds.height;
+}
+
+function isPointInsideVerticalEdgeZone(point, workArea, side, top, height, triggerSize) {
+  if (!point || !workArea) return false;
+  const withinY = point.y >= top && point.y < top + height;
+  if (!withinY) return false;
+
+  if (side === 'left') {
+    return point.x >= workArea.x && point.x < workArea.x + triggerSize;
+  }
+
+  return point.x >= workArea.x + workArea.width - triggerSize
+    && point.x < workArea.x + workArea.width;
+}
+
+function stopMainWindowAnimation() {
+  if (mainWindowSlideTimer) {
+    clearInterval(mainWindowSlideTimer);
+    mainWindowSlideTimer = null;
+  }
+}
+
+function animateWindowToBounds(windowRef, target, options = {}) {
+  const {
+    stop,
+    setTimer,
+    step = MAIN_WINDOW_SLIDE_STEP,
+    interval = MAIN_WINDOW_SLIDE_INTERVAL_MS,
+    onReached
+  } = options;
+
+  if (!windowRef || windowRef.isDestroyed()) return;
+  stop();
+  const current = windowRef.getBounds();
+  if (current.x === target.x && current.y === target.y && current.width === target.width && current.height === target.height) {
+    if (typeof onReached === 'function') {
+      onReached(target);
+    }
     return;
   }
 
-  floatingSlideTimer = setInterval(() => {
-    if (!floatingWindow || floatingWindow.isDestroyed()) {
-      stopFloatingAnimation();
+  const timer = setInterval(() => {
+    if (!windowRef || windowRef.isDestroyed()) {
+      stop();
       return;
     }
 
-    const next = floatingWindow.getBounds();
+    const next = windowRef.getBounds();
     const deltaX = target.x - next.x;
     const deltaY = target.y - next.y;
-    const stepX = Math.abs(deltaX) <= FLOATING_SLIDE_STEP ? deltaX : Math.sign(deltaX) * FLOATING_SLIDE_STEP;
-    const stepY = Math.abs(deltaY) <= FLOATING_SLIDE_STEP ? deltaY : Math.sign(deltaY) * FLOATING_SLIDE_STEP;
+    const stepX = Math.abs(deltaX) <= step ? deltaX : Math.sign(deltaX) * step;
+    const stepY = Math.abs(deltaY) <= step ? deltaY : Math.sign(deltaY) * step;
     const updated = {
       x: next.x + stepX,
       y: next.y + stepY,
-      width: FLOATING_WINDOW_SIZE,
-      height: FLOATING_WINDOW_SIZE
+      width: target.width,
+      height: target.height
     };
-    floatingWindow.setBounds(updated);
+    windowRef.setBounds(updated);
 
     if (updated.x === target.x && updated.y === target.y) {
-      floatingBoundsCache = target;
-      stopFloatingAnimation();
+      stop();
+      if (typeof onReached === 'function') {
+        onReached(target);
+      }
     }
-  }, FLOATING_SLIDE_INTERVAL_MS);
+  }, interval);
+
+  setTimer(timer);
+}
+
+function animateFloatingWindow(mode = 'hidden') {
+  if (!floatingWindow || floatingWindow.isDestroyed()) return;
+  const target = getFloatingBounds(mode);
+  animateWindowToBounds(floatingWindow, target, {
+    stop: stopFloatingAnimation,
+    setTimer: (timer) => {
+      floatingSlideTimer = timer;
+    },
+    step: FLOATING_SLIDE_STEP,
+    interval: FLOATING_SLIDE_INTERVAL_MS,
+    onReached: (bounds) => {
+      floatingBoundsCache = bounds;
+    }
+  });
 }
 
 function positionFloatingWindow() {
@@ -280,8 +394,174 @@ function showWindow() {
   if (mainWindow.isMinimized()) {
     mainWindow.restore();
   }
+  mainWindowHovered = true;
+  clearMainWindowHideTimer();
+  updateMainWindowDockCache();
+  syncMainWindowDockVisibility(true);
   mainWindow.focus();
   sendSnapshot();
+}
+
+function hideMainWindowToDock(side = null) {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized() || mainWindow.isMaximized()) {
+    return false;
+  }
+
+  const currentBounds = mainWindow.getBounds();
+  const display = screen.getDisplayMatching(currentBounds);
+  const workArea = display.workArea;
+  const nextSide = side === 'left' || side === 'right'
+    ? side
+    : ((mainWindowDockCache && (mainWindowDockCache.side === 'left' || mainWindowDockCache.side === 'right'))
+      ? mainWindowDockCache.side
+      : 'right');
+  const y = Math.max(workArea.y, Math.min(currentBounds.y, workArea.y + workArea.height - currentBounds.height));
+  const visibleBounds = {
+    x: nextSide === 'left' ? workArea.x : workArea.x + workArea.width - currentBounds.width,
+    y,
+    width: currentBounds.width,
+    height: currentBounds.height
+  };
+
+  mainWindowDockCache = {
+    ...visibleBounds,
+    side: nextSide
+  };
+  mainWindowHovered = false;
+  clearMainWindowHideTimer();
+  animateMainWindow('hidden');
+  return true;
+}
+
+function getMainWindowDockState() {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMinimized() || mainWindow.isMaximized()) {
+    return null;
+  }
+
+  const currentBounds = mainWindow.getBounds();
+  const referenceBounds = mainWindowDockMode === 'hidden' && mainWindowDockCache
+    ? mainWindowDockCache
+    : currentBounds;
+  const display = screen.getDisplayMatching(referenceBounds);
+  const workArea = display.workArea;
+  const width = referenceBounds.width;
+  const height = referenceBounds.height;
+  const leftVisibleX = workArea.x;
+  const rightVisibleX = workArea.x + workArea.width - width;
+  const distanceLeft = Math.abs(referenceBounds.x - leftVisibleX);
+  const distanceRight = Math.abs(referenceBounds.x - rightVisibleX);
+  const side = distanceLeft <= distanceRight ? 'left' : 'right';
+  const dockEligible = mainWindowDockMode === 'hidden' || Math.min(distanceLeft, distanceRight) <= MAIN_WINDOW_DOCK_THRESHOLD;
+
+  if (!dockEligible) {
+    return null;
+  }
+
+  const y = Math.max(workArea.y, Math.min(referenceBounds.y, workArea.y + workArea.height - height));
+  const visibleBounds = {
+    x: side === 'left' ? leftVisibleX : rightVisibleX,
+    y,
+    width,
+    height
+  };
+  const hiddenBounds = {
+    x: side === 'left'
+      ? workArea.x - width + MAIN_WINDOW_VISIBLE_SLIVER - MAIN_WINDOW_HIDDEN_OVERDRAW
+      : workArea.x + workArea.width - MAIN_WINDOW_VISIBLE_SLIVER + MAIN_WINDOW_HIDDEN_OVERDRAW,
+    y,
+    width,
+    height
+  };
+
+  return {
+    side,
+    workArea,
+    visibleBounds,
+    hiddenBounds
+  };
+}
+
+function updateMainWindowDockCache() {
+  const dockState = getMainWindowDockState();
+  if (!dockState) {
+    return null;
+  }
+
+  mainWindowDockCache = {
+    ...dockState.visibleBounds,
+    side: dockState.side
+  };
+  return dockState;
+}
+
+function animateMainWindow(mode = 'hidden') {
+  const dockState = getMainWindowDockState();
+  if (!dockState) {
+    return;
+  }
+
+  const target = mode === 'visible' ? dockState.visibleBounds : dockState.hiddenBounds;
+  animateWindowToBounds(mainWindow, target, {
+    stop: stopMainWindowAnimation,
+    setTimer: (timer) => {
+      mainWindowSlideTimer = timer;
+    },
+    step: MAIN_WINDOW_SLIDE_STEP,
+    interval: MAIN_WINDOW_SLIDE_INTERVAL_MS,
+    onReached: () => {
+      mainWindowDockMode = mode;
+      if (mode === 'visible') {
+        mainWindowDockCache = {
+          ...dockState.visibleBounds,
+          side: dockState.side
+        };
+      }
+    }
+  });
+}
+
+function syncMainWindowDockVisibility(forceVisible = false) {
+  if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) {
+    return;
+  }
+
+  const settings = getSettings();
+  if (!settings.dockToEdgeEnabled || mainWindow.isMaximized()) {
+    clearMainWindowHideTimer();
+    if (mainWindowDockMode === 'hidden' && mainWindowDockCache) {
+      animateMainWindow('visible');
+    } else {
+      stopMainWindowAnimation();
+      mainWindowDockMode = 'visible';
+    }
+    return;
+  }
+
+  const dockState = updateMainWindowDockCache();
+  if (!dockState) {
+    clearMainWindowHideTimer();
+    stopMainWindowAnimation();
+    mainWindowDockMode = 'visible';
+    return;
+  }
+
+  if (forceVisible || mainWindowHovered) {
+    clearMainWindowHideTimer();
+    animateMainWindow('visible');
+    return;
+  }
+
+  if (mainWindowDockMode === 'hidden') {
+    return;
+  }
+
+  clearMainWindowHideTimer();
+  mainWindowHideTimer = setTimeout(() => {
+    mainWindowHideTimer = null;
+    if (!mainWindowHovered) {
+      animateMainWindow('hidden');
+    }
+  }, MAIN_WINDOW_HIDE_DELAY_MS);
 }
 
 function syncFloatingWindowVisibility() {
@@ -290,6 +570,7 @@ function syncFloatingWindowVisibility() {
     const settings = getSettings();
     const mode = settings.dockToEdgeEnabled && !floatingHovered && !floatingPinnedVisible ? 'hidden' : 'visible';
     if (settings.floatingIconEnabled) {
+      clearFloatingHideTimer();
       if (settings.dockToEdgeEnabled) {
         animateFloatingWindow(mode);
       } else {
@@ -667,6 +948,85 @@ function applySystemSettings(settings) {
 
   syncStartupSettingFromSystem();
   syncFloatingWindowVisibility();
+  syncMainWindowDockVisibility();
+}
+
+function syncHoverStateFromCursor() {
+  const cursor = screen.getCursorScreenPoint();
+  const settings = getSettings();
+
+  if (floatingWindow && !floatingWindow.isDestroyed() && settings.floatingIconEnabled) {
+    const floatingBounds = floatingWindow.getBounds();
+    const floatingDisplay = screen.getDisplayMatching(floatingBounds);
+    const floatingWorkArea = floatingDisplay.workArea;
+    const floatingSide = getSettings().floatingDockSide === 'left' ? 'left' : 'right';
+    const nextFloatingHovered = !floatingDragState && (
+      isPointInsideBounds(cursor, floatingBounds)
+      || (settings.dockToEdgeEnabled && isPointInsideVerticalEdgeZone(
+        cursor,
+        floatingWorkArea,
+        floatingSide,
+        floatingBounds.y,
+        floatingBounds.height,
+        FLOATING_EDGE_TRIGGER_SIZE
+      ))
+    );
+    if (nextFloatingHovered) {
+      clearFloatingHideTimer();
+      if (!floatingHovered) {
+        floatingHovered = true;
+        syncFloatingWindowVisibility();
+      }
+    } else if (floatingHovered && !floatingHideTimer && !floatingDragState) {
+      floatingHideTimer = setTimeout(() => {
+        floatingHideTimer = null;
+        const latestCursor = screen.getCursorScreenPoint();
+        if (!floatingDragState && floatingWindow && !floatingWindow.isDestroyed() && !isPointInsideBounds(latestCursor, floatingWindow.getBounds())) {
+          floatingHovered = false;
+          syncFloatingWindowVisibility();
+        }
+      }, FLOATING_HIDE_DELAY_MS);
+    }
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+    const dockState = getMainWindowDockState();
+    const nextMainHovered = isPointInsideBounds(cursor, mainWindow.getBounds()) || (
+      !!dockState
+      && settings.dockToEdgeEnabled
+      && isPointInsideVerticalEdgeZone(
+        cursor,
+        dockState.workArea,
+        dockState.side,
+        dockState.visibleBounds.y,
+        dockState.visibleBounds.height,
+        MAIN_WINDOW_EDGE_TRIGGER_SIZE
+      )
+    );
+    if (nextMainHovered) {
+      clearMainWindowHideTimer();
+      if (!mainWindowHovered) {
+        mainWindowHovered = true;
+        syncMainWindowDockVisibility();
+      }
+    } else if (mainWindowHovered && !mainWindowHideTimer) {
+      mainWindowHideTimer = setTimeout(() => {
+        mainWindowHideTimer = null;
+        const latestCursor = screen.getCursorScreenPoint();
+        if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && !isPointInsideBounds(latestCursor, mainWindow.getBounds())) {
+          mainWindowHovered = false;
+          syncMainWindowDockVisibility();
+        }
+      }, MAIN_WINDOW_HIDE_DELAY_MS);
+    }
+  }
+}
+
+function setupHoverSync() {
+  if (hoverSyncTimer) {
+    clearInterval(hoverSyncTimer);
+  }
+  hoverSyncTimer = setInterval(syncHoverStateFromCursor, HOVER_SYNC_INTERVAL_MS);
 }
 
 function setupKeyboardListener() {
@@ -818,17 +1178,27 @@ function setupIpc() {
   });
 
   ipcMain.handle('open-main-window', async () => {
-    showWindow();
-    return { ok: true };
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false };
+    }
+
+    const shouldShow = !mainWindow.isVisible()
+      || mainWindow.isMinimized()
+      || mainWindowDockMode === 'hidden';
+
+    if (shouldShow) {
+      showWindow();
+      return { ok: true, visible: true };
+    }
+
+    hideMainWindowToDock('right');
+    return { ok: true, visible: false };
   });
 
   ipcMain.handle('floating-set-hovered', async (_, hovered) => {
     floatingHovered = !!hovered;
-    const settings = getSettings();
-    if (!settings.floatingIconEnabled || !settings.dockToEdgeEnabled || floatingDragState) {
-      return { ok: true };
-    }
-    animateFloatingWindow(floatingHovered ? 'visible' : 'hidden');
+    clearFloatingHideTimer();
+    syncFloatingWindowVisibility();
     return { ok: true };
   });
 
@@ -837,6 +1207,7 @@ function setupIpc() {
     stopFloatingAnimation();
     floatingPinnedVisible = true;
     floatingHovered = true;
+    clearFloatingHideTimer();
     floatingDragState = {
       offsetX: Number(payload.offsetX) || 0,
       offsetY: Number(payload.offsetY) || 0
@@ -879,6 +1250,7 @@ function setupIpc() {
     floatingDragState = null;
     floatingPinnedVisible = false;
     floatingHovered = false;
+    clearFloatingHideTimer();
     if (nextSettings.dockToEdgeEnabled) {
       animateFloatingWindow('hidden');
     } else {
@@ -927,6 +1299,7 @@ app.whenReady().then(() => {
   setupGlobalShortcuts();
   setupClipboardPolling();
   setupKeyboardListener();
+  setupHoverSync();
   applySystemSettings(getSettings());
   screen.on('display-metrics-changed', positionFloatingWindow);
   sendSnapshot('后台监听中');
@@ -936,6 +1309,14 @@ app.whenReady().then(() => {
 
 app.on('will-quit', () => {
   globalShortcut.unregisterAll();
+  if (hoverSyncTimer) {
+    clearInterval(hoverSyncTimer);
+    hoverSyncTimer = null;
+  }
+  clearFloatingHideTimer();
+  clearMainWindowHideTimer();
+  stopFloatingAnimation();
+  stopMainWindowAnimation();
   if (uIOhook) {
     try { uIOhook.stop(); } catch {}
   }
