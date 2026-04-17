@@ -34,3 +34,4 @@ token.json
 *.sqlite3
 *.db
 *.log
+tmp-print-userdata.js

@@ -1,28 +1,38 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg']);
 
 class StorageService {
   constructor(baseDir) {
     this.baseDir = baseDir;
     this.dataDir = path.join(baseDir, 'data');
     this.imagesDir = path.join(this.dataDir, 'images');
+    this.assetsDir = path.join(this.dataDir, 'assets-backups');
     this.recordsFile = path.join(this.dataDir, 'records.json');
+    this.assetsFile = path.join(this.dataDir, 'assets.json');
     this.settingsFile = path.join(this.dataDir, 'settings.json');
     this.duplicateFile = path.join(this.dataDir, 'duplicate-notices.json');
 
     fs.mkdirSync(this.imagesDir, { recursive: true });
+    fs.mkdirSync(this.assetsDir, { recursive: true });
 
     this.ensureFile(this.recordsFile, []);
+    this.ensureFile(this.assetsFile, []);
     this.ensureFile(this.settingsFile, {
       autoJudgmentEnabled: true,
       altQEnabled: true,
       doubleCopyEnabled: true,
       copyThenKeyEnabled: true,
       postCopyKey: 'Shift',
+      accumulationStartShortcut: 'Ctrl+Alt+A',
+      accumulationFinishShortcut: 'Ctrl+Alt+S',
+      accumulationCancelShortcut: 'Ctrl+Alt+X',
+      deleteLastCaptureShortcut: 'Ctrl+Alt+Z',
       startupLaunchEnabled: false,
       floatingIconEnabled: false,
       dockToEdgeEnabled: true,
+      floatingOffsetX: null,
       floatingDockSide: 'right',
       floatingOffsetY: null
     });
@@ -67,6 +77,27 @@ class StorageService {
     };
   }
 
+  normalizeAsset(asset) {
+    const createdAt = asset.createdAt ? new Date(asset.createdAt) : new Date();
+    const updatedAt = asset.updatedAt ? new Date(asset.updatedAt) : createdAt;
+    const mode = asset.mode === 'backup' ? 'backup' : 'link';
+    const primaryPath = mode === 'backup' && asset.storedPath ? asset.storedPath : asset.sourcePath;
+    const extension = asset.extension || path.extname(primaryPath || asset.sourcePath || '').toLowerCase();
+    return {
+      ...asset,
+      mode,
+      primaryPath,
+      extension,
+      name: asset.name || path.basename(primaryPath || asset.sourcePath || '未命名资源'),
+      createdAt: createdAt.toISOString(),
+      updatedAt: updatedAt.toISOString(),
+      isImage: IMAGE_EXTENSIONS.has(extension),
+      exists: primaryPath ? fs.existsSync(primaryPath) : false,
+      sourceExists: asset.sourcePath ? fs.existsSync(asset.sourcePath) : false,
+      backupExists: asset.storedPath ? fs.existsSync(asset.storedPath) : false
+    };
+  }
+
   getSettings() {
     return {
       autoJudgmentEnabled: true,
@@ -74,9 +105,14 @@ class StorageService {
       doubleCopyEnabled: true,
       copyThenKeyEnabled: true,
       postCopyKey: 'Shift',
+      accumulationStartShortcut: 'Ctrl+Alt+A',
+      accumulationFinishShortcut: 'Ctrl+Alt+S',
+      accumulationCancelShortcut: 'Ctrl+Alt+X',
+      deleteLastCaptureShortcut: 'Ctrl+Alt+Z',
       startupLaunchEnabled: false,
       floatingIconEnabled: false,
       dockToEdgeEnabled: true,
+      floatingOffsetX: null,
       floatingDockSide: 'right',
       floatingOffsetY: null,
       ...this.readJson(this.settingsFile, {})
@@ -90,6 +126,14 @@ class StorageService {
 
   getAllRecords() {
     return this.readJson(this.recordsFile, []).map((item) => this.normalizeRecordDates(item)).sort((a, b) => {
+      const timeA = new Date(a.updatedAt || a.createdAt).getTime();
+      const timeB = new Date(b.updatedAt || b.createdAt).getTime();
+      return timeB - timeA;
+    });
+  }
+
+  getAllAssets() {
+    return this.readJson(this.assetsFile, []).map((item) => this.normalizeAsset(item)).sort((a, b) => {
       const timeA = new Date(a.updatedAt || a.createdAt).getTime();
       const timeB = new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
@@ -184,6 +228,65 @@ class StorageService {
     });
   }
 
+  updateAsset(assetId, updates) {
+    const assets = this.getAllAssets();
+    const index = assets.findIndex((item) => item.id === assetId);
+    if (index === -1) return null;
+    const nextAsset = this.normalizeAsset({
+      ...assets[index],
+      ...updates,
+      updatedAt: new Date().toISOString()
+    });
+    assets[index] = nextAsset;
+    this.writeJson(this.assetsFile, assets);
+    return nextAsset;
+  }
+
+  importAssets(entries = [], mode = 'link') {
+    const assets = this.getAllAssets();
+    const imported = [];
+    const now = new Date().toISOString();
+    let nextId = assets.length ? Math.max(...assets.map((item) => Number(item.id) || 0)) + 1 : 1;
+
+    for (const entry of entries) {
+      const sourcePath = path.resolve(String(entry.sourcePath || '').trim());
+      if (!sourcePath || !fs.existsSync(sourcePath)) continue;
+      const stats = fs.statSync(sourcePath);
+      const entryType = stats.isDirectory() ? 'folder' : 'file';
+      const duplicate = assets.find((item) => item.mode === mode && item.sourcePath === sourcePath);
+      if (duplicate) {
+        const touched = this.normalizeAsset({
+          ...duplicate,
+          updatedAt: now
+        });
+        assets[assets.findIndex((item) => item.id === duplicate.id)] = touched;
+        imported.push(touched);
+        continue;
+      }
+
+      const name = path.basename(sourcePath);
+      const storedPath = mode === 'backup' ? this.copyPathToBackup(sourcePath, name) : '';
+      const asset = this.normalizeAsset({
+        id: nextId,
+        mode,
+        entryType,
+        name,
+        extension: entryType === 'file' ? path.extname(sourcePath).toLowerCase() : '',
+        sourcePath,
+        storedPath,
+        note: '',
+        createdAt: now,
+        updatedAt: now
+      });
+      assets.unshift(asset);
+      imported.push(asset);
+      nextId += 1;
+    }
+
+    this.writeJson(this.assetsFile, assets);
+    return imported;
+  }
+
   deleteRecord(recordId) {
     const records = this.getAllRecords();
     const target = records.find((item) => item.id === recordId);
@@ -200,6 +303,23 @@ class StorageService {
     }
 
     this.writeJson(this.recordsFile, records.filter((item) => item.id !== recordId));
+    return true;
+  }
+
+  deleteAsset(assetId) {
+    const assets = this.getAllAssets();
+    const target = assets.find((item) => item.id === assetId);
+    if (!target) return false;
+
+    if (target.mode === 'backup' && target.storedPath) {
+      const resolved = path.resolve(target.storedPath);
+      const root = path.resolve(this.assetsDir);
+      if (resolved.startsWith(root)) {
+        this.removePathSafe(resolved);
+      }
+    }
+
+    this.writeJson(this.assetsFile, assets.filter((item) => item.id !== assetId));
     return true;
   }
 
@@ -222,6 +342,42 @@ class StorageService {
     const file = path.join(dayDir, `${crypto.randomUUID()}.png`);
     fs.writeFileSync(file, buffer);
     return file;
+  }
+
+  copyPathToBackup(sourcePath, name) {
+    const targetPath = path.join(this.assetsDir, `${crypto.randomUUID()}-${this.sanitizeName(name || 'resource')}`);
+    this.copyPathRecursive(sourcePath, targetPath);
+    return targetPath;
+  }
+
+  copyPathRecursive(sourcePath, targetPath) {
+    const stats = fs.statSync(sourcePath);
+    if (stats.isDirectory()) {
+      fs.mkdirSync(targetPath, { recursive: true });
+      for (const child of fs.readdirSync(sourcePath)) {
+        this.copyPathRecursive(path.join(sourcePath, child), path.join(targetPath, child));
+      }
+      return;
+    }
+    fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+    fs.copyFileSync(sourcePath, targetPath);
+  }
+
+  removePathSafe(targetPath) {
+    if (!fs.existsSync(targetPath)) return;
+    const stats = fs.statSync(targetPath);
+    if (stats.isDirectory()) {
+      for (const child of fs.readdirSync(targetPath)) {
+        this.removePathSafe(path.join(targetPath, child));
+      }
+      fs.rmdirSync(targetPath);
+      return;
+    }
+    fs.unlinkSync(targetPath);
+  }
+
+  sanitizeName(name) {
+    return String(name || 'resource').replace(/[<>:\"/\\|?*\x00-\x1F]/g, '_');
   }
 
   hashText(text) {

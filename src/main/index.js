@@ -1,5 +1,7 @@
-const { app, BrowserWindow, Tray, Menu, globalShortcut, clipboard, nativeImage, ipcMain, Notification, shell, screen } = require('electron');
+const { execFileSync } = require('child_process');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, clipboard, nativeImage, ipcMain, Notification, shell, screen, dialog } = require('electron');
 const path = require('path');
+const { pathToFileURL } = require('url');
 const { StorageService } = require('./storage');
 let uIOhook = null;
 try {
@@ -14,13 +16,16 @@ const OBSERVE_WINDOW_MS = 1500;
 const COPY_SHORTCUT_POLL_DELAY_MS = 120;
 const COPY_SHORTCUT_MAX_RETRIES = 15;
 const SHORTCUT_POLL_SUPPRESS_MS = 1000;
-const FLOATING_WINDOW_SIZE = 56;
+const FLOATING_WINDOW_SIZE = 48;
 const FLOATING_WINDOW_MARGIN = 6;
 const FLOATING_VISIBLE_SLIVER = 16;
 const FLOATING_SLIDE_STEP = 8;
 const FLOATING_SLIDE_INTERVAL_MS = 10;
 const FLOATING_HIDE_DELAY_MS = 180;
 const FLOATING_EDGE_TRIGGER_SIZE = 18;
+const FLOATING_MENU_GAP = 14;
+const FLOATING_MENU_WIDTH = 252;
+const FLOATING_MENU_HEIGHT = 408;
 const MAIN_WINDOW_DOCK_THRESHOLD = 56;
 const MAIN_WINDOW_VISIBLE_SLIVER = 2;
 const MAIN_WINDOW_HIDDEN_OVERDRAW = 14;
@@ -53,7 +58,11 @@ let floatingDragState = null;
 let floatingHovered = false;
 let floatingPinnedVisible = false;
 let floatingBoundsCache = null;
+let floatingAnchorBoundsCache = null;
 let floatingHideTimer = null;
+let floatingMenuOpen = false;
+let floatingMenuSide = 'right';
+let accumulationSession = null;
 let mainWindowHovered = false;
 let mainWindowSlideTimer = null;
 let mainWindowDockMode = 'visible';
@@ -188,19 +197,21 @@ function createWindow() {
   });
 }
 
-function getFloatingBounds(mode = 'hidden') {
+function getFloatingAnchorBounds(mode = 'hidden') {
   const settings = getSettings();
   const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const workArea = display.workArea;
   const side = settings.floatingDockSide === 'left' ? 'left' : 'right';
+  const offsetX = Number.isFinite(settings.floatingOffsetX) ? settings.floatingOffsetX : null;
   const offsetY = Number.isFinite(settings.floatingOffsetY) ? settings.floatingOffsetY : null;
+  const maxX = workArea.x + workArea.width - FLOATING_WINDOW_SIZE - FLOATING_WINDOW_MARGIN;
   const maxY = workArea.y + workArea.height - FLOATING_WINDOW_SIZE - FLOATING_WINDOW_MARGIN;
   const fallbackY = settings.dockToEdgeEnabled
     ? workArea.y + Math.round((workArea.height - FLOATING_WINDOW_SIZE) / 2)
     : workArea.y + workArea.height - FLOATING_WINDOW_SIZE - 96;
   const y = Math.min(maxY, Math.max(workArea.y + FLOATING_WINDOW_MARGIN, offsetY === null ? fallbackY : workArea.y + offsetY));
 
-  let x = workArea.x + workArea.width - FLOATING_WINDOW_SIZE - FLOATING_WINDOW_MARGIN;
+  let x = Math.min(maxX, Math.max(workArea.x + FLOATING_WINDOW_MARGIN, offsetX === null ? maxX : workArea.x + offsetX));
   if (settings.dockToEdgeEnabled) {
     if (side === 'left') {
       x = mode === 'visible'
@@ -217,7 +228,54 @@ function getFloatingBounds(mode = 'hidden') {
     x,
     y,
     width: FLOATING_WINDOW_SIZE,
-    height: FLOATING_WINDOW_SIZE
+    height: FLOATING_WINDOW_SIZE,
+    side,
+    workArea
+  };
+}
+
+function getFloatingBounds(mode = 'hidden', expanded = floatingMenuOpen) {
+  const anchor = floatingAnchorBoundsCache || getFloatingAnchorBounds(mode);
+  const display = screen.getDisplayMatching(anchor);
+  const workArea = display.workArea;
+  const side = anchor.side || (getSettings().floatingDockSide === 'left' ? 'left' : 'right');
+  const buttonSize = FLOATING_WINDOW_SIZE;
+  const width = expanded ? FLOATING_MENU_WIDTH + FLOATING_MENU_GAP + buttonSize : buttonSize;
+  const availableHeight = Math.max(buttonSize, workArea.height - FLOATING_WINDOW_MARGIN * 2);
+  const height = expanded ? Math.min(availableHeight, Math.max(FLOATING_MENU_HEIGHT, buttonSize)) : buttonSize;
+  const maxX = workArea.x + workArea.width - width;
+  const maxY = workArea.y + workArea.height - height;
+  let x = anchor.x;
+  let y = Math.max(workArea.y, Math.min(anchor.y, maxY));
+
+  if (expanded) {
+    const anchorLeft = anchor.x;
+    const anchorTop = anchor.y;
+    const leftSpace = anchorLeft - workArea.x;
+    const rightSpace = workArea.x + workArea.width - (anchorLeft + buttonSize);
+    const buttonSide = side
+      ? side
+      : (leftSpace >= FLOATING_MENU_WIDTH + FLOATING_MENU_GAP || leftSpace >= rightSpace ? 'right' : 'left');
+    floatingMenuSide = buttonSide;
+    x = buttonSide === 'right'
+      ? anchorLeft - (FLOATING_MENU_WIDTH + FLOATING_MENU_GAP)
+      : anchorLeft;
+    x = Math.max(workArea.x, Math.min(x, maxX));
+    y = Math.max(workArea.y, Math.min(anchorTop, maxY));
+  } else {
+    floatingMenuSide = side === 'left' ? 'left' : 'right';
+    x = Math.max(workArea.x, Math.min(anchor.x, maxX));
+  }
+
+  return {
+    x,
+    y,
+    width,
+    height,
+    anchorX: anchor.x,
+    anchorY: anchor.y,
+    side,
+    workArea
   };
 }
 
@@ -321,7 +379,7 @@ function animateWindowToBounds(windowRef, target, options = {}) {
 
 function animateFloatingWindow(mode = 'hidden') {
   if (!floatingWindow || floatingWindow.isDestroyed()) return;
-  const target = getFloatingBounds(mode);
+  const target = getFloatingBounds(mode, false);
   animateWindowToBounds(floatingWindow, target, {
     stop: stopFloatingAnimation,
     setTimer: (timer) => {
@@ -331,14 +389,56 @@ function animateFloatingWindow(mode = 'hidden') {
     interval: FLOATING_SLIDE_INTERVAL_MS,
     onReached: (bounds) => {
       floatingBoundsCache = bounds;
+      floatingAnchorBoundsCache = {
+        x: bounds.x,
+        y: bounds.y,
+        width: FLOATING_WINDOW_SIZE,
+        height: FLOATING_WINDOW_SIZE,
+        side: getSettings().floatingDockSide === 'left' ? 'left' : 'right'
+      };
     }
   });
 }
 
+function getCurrentFloatingAnchorBounds() {
+  if (!floatingWindow || floatingWindow.isDestroyed()) {
+    return floatingAnchorBoundsCache;
+  }
+
+  const bounds = floatingWindow.getBounds();
+  if (floatingMenuOpen) {
+    const anchorX = floatingMenuSide === 'left'
+      ? bounds.x
+      : bounds.x + bounds.width - FLOATING_WINDOW_SIZE;
+    return {
+      x: anchorX,
+      y: bounds.y,
+      width: FLOATING_WINDOW_SIZE,
+      height: FLOATING_WINDOW_SIZE,
+      side: floatingMenuSide
+    };
+  }
+
+  return {
+    x: bounds.x,
+    y: bounds.y,
+    width: FLOATING_WINDOW_SIZE,
+    height: FLOATING_WINDOW_SIZE,
+    side: (() => {
+      const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y });
+      const workArea = display.workArea;
+      return bounds.x + (FLOATING_WINDOW_SIZE / 2) < workArea.x + (workArea.width / 2) ? 'left' : 'right';
+    })()
+  };
+}
+
 function positionFloatingWindow() {
   if (!floatingWindow || floatingWindow.isDestroyed()) return;
-  const mode = getSettings().dockToEdgeEnabled && !floatingHovered && !floatingPinnedVisible ? 'hidden' : 'visible';
-  const bounds = getFloatingBounds(mode);
+  const dockable = getSettings().dockToEdgeEnabled && !(accumulationSession && accumulationSession.active);
+  const mode = dockable && !floatingHovered && !floatingPinnedVisible && !floatingMenuOpen ? 'hidden' : 'visible';
+  const anchor = getFloatingAnchorBounds(mode);
+  floatingAnchorBoundsCache = anchor;
+  const bounds = getFloatingBounds(mode, floatingMenuOpen);
   stopFloatingAnimation();
   floatingBoundsCache = bounds;
   floatingWindow.setBounds(bounds);
@@ -370,6 +470,12 @@ function createFloatingWindow() {
   floatingWindow.once('ready-to-show', () => {
     positionFloatingWindow();
     syncFloatingWindowVisibility();
+    sendFloatingMenuState();
+  });
+  floatingWindow.on('blur', () => {
+    if (floatingMenuOpen && !floatingDragState) {
+      closeFloatingMenu();
+    }
   });
 }
 
@@ -383,6 +489,25 @@ function createTray() {
   ]);
   tray.setContextMenu(menu);
   tray.on('double-click', showWindow);
+}
+
+function openFloatingMenu() {
+  floatingAnchorBoundsCache = getCurrentFloatingAnchorBounds() || floatingAnchorBoundsCache;
+  floatingMenuOpen = true;
+  floatingPinnedVisible = true;
+  floatingHovered = true;
+  clearFloatingHideTimer();
+  positionFloatingWindow();
+  sendFloatingMenuState();
+}
+
+function closeFloatingMenu() {
+  if (!floatingMenuOpen) return;
+  floatingAnchorBoundsCache = getCurrentFloatingAnchorBounds() || floatingAnchorBoundsCache;
+  floatingMenuOpen = false;
+  floatingPinnedVisible = false;
+  positionFloatingWindow();
+  sendFloatingMenuState();
 }
 
 function showWindow() {
@@ -568,10 +693,14 @@ function syncFloatingWindowVisibility() {
   if (!floatingWindow || floatingWindow.isDestroyed()) return;
   try {
     const settings = getSettings();
-    const mode = settings.dockToEdgeEnabled && !floatingHovered && !floatingPinnedVisible ? 'hidden' : 'visible';
+    const dockable = settings.dockToEdgeEnabled
+      && (settings.floatingDockSide === 'left' || settings.floatingDockSide === 'right')
+      && !(accumulationSession && accumulationSession.active)
+      && !floatingMenuOpen;
+    const mode = dockable && !floatingHovered && !floatingPinnedVisible ? 'hidden' : 'visible';
     if (settings.floatingIconEnabled) {
       clearFloatingHideTimer();
-      if (settings.dockToEdgeEnabled) {
+      if (dockable) {
         animateFloatingWindow(mode);
       } else {
         positionFloatingWindow();
@@ -588,6 +717,7 @@ function syncFloatingWindowVisibility() {
     } else {
       floatingWindow.hide();
     }
+    sendFloatingMenuState();
   } catch {
     if (floatingWindow && !floatingWindow.isDestroyed()) {
       try {
@@ -610,6 +740,124 @@ function getSettings() {
   return storage.getSettings();
 }
 
+function getAccumulationState() {
+  const settings = getSettings();
+  return {
+    active: !!(accumulationSession && accumulationSession.active),
+    count: accumulationSession ? Number(accumulationSession.segmentCount || 0) : 0,
+    finishShortcutLabel: settings.accumulationFinishShortcut || '',
+    cancelShortcutLabel: settings.accumulationCancelShortcut || ''
+  };
+}
+
+function buildRecordPreview(record) {
+  if (!record) return '';
+  if (record.contentType === 'text') {
+    const text = String(record.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.length > 16 ? `${text.slice(0, 16)}...` : (text || '文本记录');
+  }
+  return path.basename(record.imagePath || '') || '图片记录';
+}
+
+function getLastCaptureState() {
+  const settings = getSettings();
+  const record = storage.getAllRecords()[0];
+  if (!record) {
+    return {
+      available: false,
+      preview: '',
+      shortcutLabel: settings.deleteLastCaptureShortcut || ''
+    };
+  }
+
+  return {
+    available: true,
+    preview: buildRecordPreview(record),
+    shortcutLabel: settings.deleteLastCaptureShortcut || ''
+  };
+}
+
+function sendFloatingMenuState() {
+  if (!floatingWindow || floatingWindow.isDestroyed() || !floatingWindow.webContents || floatingWindow.webContents.isDestroyed()) {
+    return;
+  }
+  floatingWindow.webContents.send('floating-menu-state', {
+    open: floatingMenuOpen,
+    dockSide: getSettings().floatingDockSide === 'left' ? 'left' : 'right',
+    menuSide: floatingMenuSide,
+    accumulation: getAccumulationState(),
+    lastCapture: getLastCaptureState()
+  });
+}
+
+function getForegroundWindowContext() {
+  if (process.platform !== 'win32') {
+    return {
+      sourceApp: '未知应用',
+      windowTitle: '未获取到窗口标题'
+    };
+  }
+
+  const script = [
+    '$ErrorActionPreference = "Stop"',
+    'Add-Type @\'',
+    'using System;',
+    'using System.Runtime.InteropServices;',
+    'using System.Text;',
+    'public static class Click2SaveNative {',
+    '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
+    '  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);',
+    '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);',
+    '}',
+    '\'@',
+    '$hwnd = [Click2SaveNative]::GetForegroundWindow()',
+    '$titleBuilder = New-Object System.Text.StringBuilder 1024',
+    '[void][Click2SaveNative]::GetWindowText($hwnd, $titleBuilder, $titleBuilder.Capacity)',
+    '$pid = 0',
+    '[void][Click2SaveNative]::GetWindowThreadProcessId($hwnd, [ref]$pid)',
+    '$process = Get-Process -Id $pid -ErrorAction SilentlyContinue',
+    '[pscustomobject]@{',
+    '  title = $titleBuilder.ToString()',
+    '  processName = if ($process) { $process.ProcessName } else { "" }',
+    '  processPath = if ($process) { $process.Path } else { "" }',
+    '} | ConvertTo-Json -Compress'
+  ].join('\n');
+
+  try {
+    const output = execFileSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script], {
+      windowsHide: true,
+      encoding: 'utf8',
+      timeout: 1200
+    }).trim();
+    const payload = output ? JSON.parse(output) : {};
+    return {
+      sourceApp: normalizeSourceAppName(payload.processName, payload.processPath),
+      windowTitle: String(payload.title || '').trim() || '未获取到窗口标题'
+    };
+  } catch {
+    return {
+      sourceApp: '未知应用',
+      windowTitle: '未获取到窗口标题'
+    };
+  }
+}
+
+function normalizeSourceAppName(processName = '', processPath = '') {
+  const rawName = String(processName || '').trim();
+  const lowerName = rawName.toLowerCase();
+  const fileName = path.basename(String(processPath || '').trim() || rawName).toLowerCase();
+
+  if (lowerName === 'wechat' || fileName === 'wechat.exe') return '微信';
+  if (lowerName === 'qq' || fileName === 'qq.exe') return 'QQ';
+  if (lowerName === 'chrome' || fileName === 'chrome.exe') return 'Google Chrome';
+  if (lowerName === 'msedge' || fileName === 'msedge.exe') return 'Microsoft Edge';
+  if (lowerName === 'firefox' || fileName === 'firefox.exe') return 'Firefox';
+  if (lowerName === 'explorer' || fileName === 'explorer.exe') return '资源管理器';
+  if (lowerName === 'code' || fileName === 'code.exe') return 'Visual Studio Code';
+  if (lowerName === 'powershell' || fileName === 'powershell.exe' || fileName === 'pwsh.exe') return 'PowerShell';
+  return rawName || '未知应用';
+}
+
 function normalizeRecord(record) {
   const lastCapturedAt = record.lastCapturedAt || record.updatedAt || record.createdAt;
   return {
@@ -622,7 +870,8 @@ function normalizeRecord(record) {
       manual: '手动新增',
       auto: '自动判断',
       hotkey_alt_q: 'Alt+Q 主动收藏',
-      double_copy: '双复制收藏',
+      accumulation: '累计复制',
+      double_copy: '累计复制收藏',
       copy_then_key: '复制后按键收藏'
     }[record.captureMethod] || '未知方式',
     sourceAppDisplay: record.sourceApp || '未知应用',
@@ -639,15 +888,44 @@ function normalizeRecord(record) {
   };
 }
 
+function normalizeAsset(asset) {
+  const primaryPath = asset.primaryPath || (asset.mode === 'backup' && asset.storedPath ? asset.storedPath : asset.sourcePath);
+  return {
+    ...asset,
+    primaryPath,
+    modeDisplay: asset.mode === 'backup' ? '完整备份' : '快捷入口',
+    entryTypeDisplay: asset.entryType === 'folder' ? '文件夹' : '文件',
+    statusDisplay: asset.exists ? '可用' : '路径失效',
+    createdAtDisplay: new Date(asset.createdAt).toLocaleString('zh-CN', { hour12: false }),
+    updatedAtDisplay: new Date(asset.updatedAt).toLocaleString('zh-CN', { hour12: false }),
+    sourcePathDisplay: asset.sourcePath || '未记录原路径',
+    storedPathDisplay: asset.storedPath || '未生成备份副本',
+    previewUrl: asset.isImage && primaryPath ? pathToFileURL(primaryPath).href : '',
+    hasSecondaryOpen: !!asset.storedPath && !!asset.sourcePath && asset.storedPath !== asset.sourcePath
+  };
+}
+
+function defaultStatusText() {
+  if (accumulationSession && accumulationSession.active) {
+    return `累计复制中，已收集 ${accumulationSession.segmentCount || 0} 段`;
+  }
+  if (observing) {
+    return currentObserveStatusText();
+  }
+  return '后台监听中';
+}
+
 function sendSnapshot(statusText) {
   if (!mainWindow || mainWindow.webContents.isDestroyed()) return;
   const records = storage.getAllRecords().map(normalizeRecord);
+  const assets = storage.getAllAssets().map(normalizeAsset);
   mainWindow.webContents.send('snapshot', {
     records,
+    assets,
     dateFilters: storage.getDateFilters(),
     categoryFilters: storage.getCategoryFilters(),
     settings: getSettings(),
-    statusText: statusText || '后台监听中'
+    statusText: statusText || defaultStatusText()
   });
 }
 
@@ -681,6 +959,10 @@ function readClipboardPayload() {
 
 function processPayload(payload, method, statusLabel, options = {}) {
   const category = options.category || 'daily';
+  const sourceContext = {
+    ...getForegroundWindowContext(),
+    ...(options.sourceContext || {})
+  };
   const duplicate = storage.findDuplicate(payload);
   if (duplicate) {
     const isExplicitCapture = method !== 'auto';
@@ -704,11 +986,192 @@ function processPayload(payload, method, statusLabel, options = {}) {
 
   storage.addRecord(payload, method, {
     category,
-    sourceApp: '未知应用',
-    windowTitle: '暂未接入窗口标题'
+    sourceApp: sourceContext.sourceApp,
+    windowTitle: sourceContext.windowTitle
   });
   notify('Click2Save', '已收藏');
   sendSnapshot(statusLabel || '收藏成功');
+  sendFloatingMenuState();
+}
+
+function quickCaptureClipboard(options = {}) {
+  const clip = readClipboardPayload();
+  if (!clip) {
+    sendSnapshot('剪贴板里没有可收藏内容');
+    sendFloatingMenuState();
+    return { ok: false, message: '剪贴板里没有可收藏内容' };
+  }
+
+  processPayload(
+    clip,
+    options.method || 'manual',
+    options.category === 'common' ? '已加入常用' : '已收藏',
+    { category: options.category === 'common' ? 'common' : 'daily' }
+  );
+  return { ok: true };
+}
+
+function formatAccumulationText(segments = []) {
+  return segments.map((item) => String(item.text || '').trim()).filter(Boolean).join('\n');
+}
+
+function startAccumulation() {
+  stopObserving();
+  accumulationSession = {
+    active: true,
+    recordId: null,
+    segments: [],
+    segmentCount: 0
+  };
+  floatingPinnedVisible = true;
+  floatingHovered = true;
+  clearFloatingHideTimer();
+  sendFloatingMenuState();
+  syncFloatingWindowVisibility();
+  sendSnapshot('累计复制已开始');
+  return { ok: true };
+}
+
+function appendAccumulationPayload(payload) {
+  if (!accumulationSession || !accumulationSession.active) {
+    return { ok: false, message: '当前没有进行中的累计复制' };
+  }
+
+  if (!payload || payload.contentType !== 'text') {
+    sendSnapshot('累计复制仅支持文本内容');
+    return { ok: false, message: '累计复制仅支持文本内容' };
+  }
+
+  const text = String(payload.textContent || '').trim();
+  if (!text) {
+    return { ok: false, message: '内容不能为空' };
+  }
+
+  accumulationSession.segments.push({ text });
+  accumulationSession.segmentCount = accumulationSession.segments.length;
+  const mergedText = formatAccumulationText(accumulationSession.segments);
+
+  if (!accumulationSession.recordId) {
+    const sourceContext = getForegroundWindowContext();
+    const created = storage.addRecord({
+      contentType: 'text',
+      textContent: mergedText,
+      signature: storage.hashText(mergedText)
+    }, 'accumulation', {
+      category: 'daily',
+      sourceApp: sourceContext.sourceApp,
+      windowTitle: sourceContext.windowTitle
+    });
+    storage.updateRecord(created.id, {
+      accumulationActive: true,
+      accumulationCount: accumulationSession.segmentCount,
+      accumulationSegments: accumulationSession.segments
+    });
+    accumulationSession.recordId = created.id;
+  } else {
+    storage.updateRecord(accumulationSession.recordId, {
+      textContent: mergedText,
+      accumulationActive: true,
+      accumulationCount: accumulationSession.segmentCount,
+      accumulationSegments: accumulationSession.segments,
+      lastCapturedAt: new Date().toISOString()
+    });
+  }
+
+  sendFloatingMenuState();
+  sendSnapshot(`累计复制中，已收集 ${accumulationSession.segmentCount} 段`);
+  return { ok: true, recordId: accumulationSession.recordId, count: accumulationSession.segmentCount };
+}
+
+function undoAccumulation() {
+  if (!accumulationSession || !accumulationSession.active) {
+    sendSnapshot('当前没有进行中的累计复制');
+    return { ok: false, message: '当前没有进行中的累计复制' };
+  }
+
+  accumulationSession.segments.pop();
+  accumulationSession.segmentCount = accumulationSession.segments.length;
+
+  if (!accumulationSession.segmentCount) {
+    if (accumulationSession.recordId) {
+      storage.deleteRecord(accumulationSession.recordId);
+    }
+    accumulationSession.recordId = null;
+    sendFloatingMenuState();
+    sendSnapshot('已撤销到空白累计');
+    return { ok: true, empty: true };
+  }
+
+  const mergedText = formatAccumulationText(accumulationSession.segments);
+  storage.updateRecord(accumulationSession.recordId, {
+    textContent: mergedText,
+    accumulationActive: true,
+    accumulationCount: accumulationSession.segmentCount,
+    accumulationSegments: accumulationSession.segments,
+    lastCapturedAt: new Date().toISOString()
+  });
+  sendFloatingMenuState();
+  sendSnapshot(`已撤销上一段，剩余 ${accumulationSession.segmentCount} 段`);
+  return { ok: true, count: accumulationSession.segmentCount };
+}
+
+function finishAccumulation() {
+  if (!accumulationSession || !accumulationSession.active) {
+    sendSnapshot('当前没有进行中的累计复制');
+    return { ok: false, message: '当前没有进行中的累计复制' };
+  }
+
+  if (accumulationSession.recordId) {
+    storage.updateRecord(accumulationSession.recordId, {
+      accumulationActive: false,
+      accumulationCount: accumulationSession.segmentCount,
+      accumulationSegments: accumulationSession.segments
+    });
+  }
+
+  accumulationSession = null;
+  floatingPinnedVisible = false;
+  sendFloatingMenuState();
+  syncFloatingWindowVisibility();
+  sendSnapshot('累计复制已结束');
+  return { ok: true };
+}
+
+function cancelAccumulation() {
+  if (!accumulationSession || !accumulationSession.active) {
+    sendSnapshot('当前没有进行中的累计复制');
+    return { ok: false, message: '当前没有进行中的累计复制' };
+  }
+
+  if (accumulationSession.recordId) {
+    storage.deleteRecord(accumulationSession.recordId);
+  }
+
+  accumulationSession = null;
+  floatingPinnedVisible = false;
+  sendFloatingMenuState();
+  syncFloatingWindowVisibility();
+  sendSnapshot('累计复制已取消');
+  return { ok: true };
+}
+
+function deleteLastCapture() {
+  const latest = storage.getAllRecords()[0];
+  if (!latest) {
+    sendSnapshot('暂无可删除的最近收藏');
+    sendFloatingMenuState();
+    return { ok: false, message: '暂无可删除的最近收藏' };
+  }
+
+  if (accumulationSession && accumulationSession.recordId === latest.id) {
+    accumulationSession = null;
+    floatingPinnedVisible = false;
+  }
+
+  const ok = storage.deleteRecord(latest.id);
+  sendFloatingMenuState();
+  sendSnapshot(ok ? '已删除上次收藏' : '删除失败');
+  return { ok };
 }
 
 function markPollingSuppressed(signature) {
@@ -816,6 +1279,12 @@ function handleClipboardChanged(payload, source = 'clipboard_poll') {
   if (altQFlowActive) return;
   const settings = getSettings();
 
+  if (accumulationSession && accumulationSession.active) {
+    stopObserving();
+    appendAccumulationPayload(payload);
+    return;
+  }
+
   if (observing && source === 'copy_shortcut' && observeContext) {
     observeContext.copyActionCount += 1;
   }
@@ -823,7 +1292,7 @@ function handleClipboardChanged(payload, source = 'clipboard_poll') {
   if (observing && settings.doubleCopyEnabled && observeContext && observeContext.source === 'copy_shortcut' && observeContext.copyActionCount >= 2) {
     const current = payload;
     stopObserving();
-    processPayload(current, 'double_copy', '双复制已收藏');
+    processPayload(current, 'double_copy', '累计复制已收藏');
     return;
   }
 
@@ -1084,6 +1553,7 @@ function setupKeyboardListener() {
 function setupIpc() {
   ipcMain.handle('get-initial-data', async () => ({
     records: storage.getAllRecords().map(normalizeRecord),
+    assets: storage.getAllAssets().map(normalizeAsset),
     dateFilters: storage.getDateFilters(),
     categoryFilters: storage.getCategoryFilters(),
     settings: getSettings(),
@@ -1165,6 +1635,73 @@ function setupIpc() {
     return { ok: false, message: '该记录没有可复制内容' };
   });
 
+  ipcMain.handle('select-asset-files', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile', 'multiSelections']
+    });
+    return {
+      canceled: result.canceled,
+      paths: result.filePaths || []
+    };
+  });
+
+  ipcMain.handle('select-asset-folders', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory', 'multiSelections']
+    });
+    return {
+      canceled: result.canceled,
+      paths: result.filePaths || []
+    };
+  });
+
+  ipcMain.handle('import-assets', async (_, payload = {}) => {
+    try {
+      const mode = payload.mode === 'backup' ? 'backup' : 'link';
+      const paths = Array.isArray(payload.paths) ? payload.paths : [];
+      const imported = storage.importAssets(paths.map((sourcePath) => ({ sourcePath })), mode);
+      sendSnapshot(imported.length ? '资源已导入' : '没有可导入的新资源');
+      return { ok: true, count: imported.length };
+    } catch (error) {
+      const message = error && error.message ? error.message : '导入失败';
+      sendSnapshot(message);
+      return { ok: false, message };
+    }
+  });
+
+  ipcMain.handle('update-asset-note', async (_, payload = {}) => {
+    const result = storage.updateAsset(payload.id, { note: payload.note || '' });
+    sendSnapshot('资源备注已保存');
+    return { ok: !!result };
+  });
+
+  ipcMain.handle('open-asset-primary', async (_, id) => {
+    const asset = storage.getAllAssets().find((item) => item.id === id);
+    if (!asset || !asset.primaryPath) return { ok: false, message: '资源不存在' };
+    const errorMessage = await shell.openPath(asset.primaryPath);
+    return { ok: !errorMessage, message: errorMessage || '' };
+  });
+
+  ipcMain.handle('open-asset-source', async (_, id) => {
+    const asset = storage.getAllAssets().find((item) => item.id === id);
+    if (!asset || !asset.sourcePath) return { ok: false, message: '原路径不存在' };
+    const errorMessage = await shell.openPath(asset.sourcePath);
+    return { ok: !errorMessage, message: errorMessage || '' };
+  });
+
+  ipcMain.handle('open-asset-location', async (_, id) => {
+    const asset = storage.getAllAssets().find((item) => item.id === id);
+    if (!asset) return { ok: false, message: '资源不存在' };
+    shell.showItemInFolder(asset.primaryPath || asset.sourcePath);
+    return { ok: true };
+  });
+
+  ipcMain.handle('delete-asset', async (_, id) => {
+    const ok = storage.deleteAsset(id);
+    sendSnapshot('资源已删除');
+    return { ok };
+  });
+
   ipcMain.handle('move-record-to-common', async (_, id) => {
     const result = storage.updateRecord(id, { category: 'common' });
     sendSnapshot('已加入常用');
@@ -1195,6 +1732,53 @@ function setupIpc() {
     return { ok: true, visible: false };
   });
 
+  ipcMain.handle('floating-toggle-menu', async () => {
+    if (floatingMenuOpen) {
+      closeFloatingMenu();
+    } else {
+      openFloatingMenu();
+    }
+    return { ok: true };
+  });
+
+  ipcMain.handle('floating-close-menu', async () => {
+    closeFloatingMenu();
+    return { ok: true };
+  });
+
+  ipcMain.handle('floating-get-menu-state', async () => ({
+    open: floatingMenuOpen,
+    dockSide: getSettings().floatingDockSide === 'left' ? 'left' : 'right',
+    menuSide: floatingMenuSide,
+    accumulation: getAccumulationState(),
+    lastCapture: getLastCaptureState()
+  }));
+
+  ipcMain.handle('floating-quick-save', async () => quickCaptureClipboard({ category: 'daily' }));
+
+  ipcMain.handle('floating-quick-save-common', async () => quickCaptureClipboard({ category: 'common' }));
+
+  ipcMain.handle('start-accumulation', async () => startAccumulation());
+
+  ipcMain.handle('undo-accumulation', async () => undoAccumulation());
+
+  ipcMain.handle('finish-accumulation', async () => finishAccumulation());
+
+  ipcMain.handle('cancel-accumulation', async () => cancelAccumulation());
+
+  ipcMain.handle('delete-last-capture', async () => deleteLastCapture());
+
+  ipcMain.handle('disable-floating-icon', async () => {
+    closeFloatingMenu();
+    const saved = storage.saveSettings({
+      ...getSettings(),
+      floatingIconEnabled: false
+    });
+    applySystemSettings(saved);
+    sendSnapshot('已关闭悬浮图标');
+    return { ok: true };
+  });
+
   ipcMain.handle('floating-set-hovered', async (_, hovered) => {
     floatingHovered = !!hovered;
     clearFloatingHideTimer();
@@ -1205,6 +1789,7 @@ function setupIpc() {
   ipcMain.handle('floating-drag-start', async (_, payload = {}) => {
     if (!floatingWindow || floatingWindow.isDestroyed()) return { ok: false };
     stopFloatingAnimation();
+    floatingMenuOpen = false;
     floatingPinnedVisible = true;
     floatingHovered = true;
     clearFloatingHideTimer();
@@ -1212,6 +1797,7 @@ function setupIpc() {
       offsetX: Number(payload.offsetX) || 0,
       offsetY: Number(payload.offsetY) || 0
     };
+    sendFloatingMenuState();
     return { ok: true };
   });
 
@@ -1227,12 +1813,18 @@ function setupIpc() {
       workArea.y + workArea.height - FLOATING_WINDOW_SIZE,
       Math.max(workArea.y, (Number(payload.screenY) || 0) - floatingDragState.offsetY)
     );
-    floatingWindow.setBounds({
+    const nextBounds = {
       x: nextX,
       y: nextY,
       width: FLOATING_WINDOW_SIZE,
       height: FLOATING_WINDOW_SIZE
-    });
+    };
+    floatingAnchorBoundsCache = {
+      ...nextBounds,
+      side: nextX + (FLOATING_WINDOW_SIZE / 2) < workArea.x + (workArea.width / 2) ? 'left' : 'right'
+    };
+    floatingBoundsCache = { ...nextBounds, anchorX: nextX, anchorY: nextY };
+    floatingWindow.setBounds(nextBounds);
     return { ok: true };
   });
 
@@ -1244,6 +1836,8 @@ function setupIpc() {
     const side = bounds.x + (FLOATING_WINDOW_SIZE / 2) < workArea.x + (workArea.width / 2) ? 'left' : 'right';
     const nextSettings = storage.saveSettings({
       ...getSettings(),
+      dockToEdgeEnabled: false,
+      floatingOffsetX: Math.max(0, bounds.x - workArea.x),
       floatingDockSide: side,
       floatingOffsetY: Math.max(0, bounds.y - workArea.y)
     });
@@ -1251,11 +1845,15 @@ function setupIpc() {
     floatingPinnedVisible = false;
     floatingHovered = false;
     clearFloatingHideTimer();
-    if (nextSettings.dockToEdgeEnabled) {
-      animateFloatingWindow('hidden');
-    } else {
-      positionFloatingWindow();
-    }
+    floatingAnchorBoundsCache = {
+      x: bounds.x,
+      y: bounds.y,
+      width: FLOATING_WINDOW_SIZE,
+      height: FLOATING_WINDOW_SIZE,
+      side
+    };
+    positionFloatingWindow();
+    sendFloatingMenuState();
     sendSnapshot('悬浮图标位置已更新');
     return { ok: true };
   });

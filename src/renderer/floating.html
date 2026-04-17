@@ -8,7 +8,47 @@
     <link rel="stylesheet" href="./floating.css" />
   </head>
   <body>
-    <button id="floatingAction" class="floating-action" title="打开 Click2Save">C</button>
+    <div id="floatingShell" class="floating-shell" data-side="right">
+      <section id="floatingMenu" class="floating-menu hidden" aria-label="快捷菜单">
+        <button id="openMainWindowBtn" class="menu-action" type="button">
+          <span class="menu-title">打开主窗口</span>
+          <span class="menu-desc">查看列表与完整设置</span>
+        </button>
+        <button id="quickSaveBtn" class="menu-action primary" type="button">
+          <span class="menu-title">收藏剪贴板</span>
+          <span class="menu-desc">保存当前文本或图片</span>
+        </button>
+        <button id="quickCommonBtn" class="menu-action" type="button">
+          <span class="menu-title">加入常用</span>
+          <span class="menu-desc">直接加入高频收藏</span>
+        </button>
+        <button id="deleteLastCaptureBtn" class="menu-action" type="button">
+          <span class="menu-title">删除上次收藏</span>
+          <span class="menu-desc">暂无可删除的最近收藏</span>
+        </button>
+        <button id="startAccumulationBtn" class="menu-action" type="button">
+          <span class="menu-title">开始累计</span>
+          <span class="menu-desc">连续复制并合并到同一张卡片</span>
+        </button>
+        <button id="finishAccumulationBtn" class="menu-action hidden" type="button">
+          <span class="menu-title">结束累计</span>
+          <span class="menu-desc">结束当前累计复制并保留卡片</span>
+        </button>
+        <button id="undoAccumulationBtn" class="menu-action hidden" type="button">
+          <span class="menu-title">撤销上一段</span>
+          <span class="menu-desc">删除最近一次累计的片段</span>
+        </button>
+        <button id="cancelAccumulationBtn" class="menu-action hidden" type="button">
+          <span class="menu-title">取消累计</span>
+          <span class="menu-desc">退出累计复制，保留当前已保存内容</span>
+        </button>
+        <button id="hideFloatingBtn" class="menu-action" type="button">
+          <span class="menu-title">关闭悬浮图标</span>
+          <span class="menu-desc">隐藏悬浮入口，可在设置中重新开启</span>
+        </button>
+      </section>
+      <button id="floatingAction" class="floating-action" type="button" title="快捷菜单">C</button>
+    </div>
     <script src="./floating.js"></script>
   </body>
 </html>

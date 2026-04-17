@@ -40,9 +40,17 @@
               <span class="rail-icon">☰</span>
               <span class="rail-label">每日内容</span>
             </button>
-            <button id="commonPageBtn" class="rail-btn" title="其它分类">
+            <button id="commonPageBtn" class="rail-btn" title="常用">
               <span class="rail-icon">★</span>
-              <span class="rail-label">高频收藏</span>
+              <span class="rail-label">常用</span>
+            </button>
+            <button id="backupPageBtn" class="rail-btn" title="备份库">
+              <span class="rail-icon">⬒</span>
+              <span class="rail-label">备份库</span>
+            </button>
+            <button id="linksPageBtn" class="rail-btn" title="快捷入口">
+              <span class="rail-icon">↗</span>
+              <span class="rail-label">快捷入口</span>
             </button>
             <button id="settingsPageBtn" class="rail-btn" title="设置">
               <span class="rail-icon">⚙</span>
@@ -70,11 +78,10 @@
           <header class="topbar">
             <nav class="mobile-nav-bar">
               <button id="mobileDailyNavBtn" class="mobile-nav-btn active" type="button">每日</button>
-              <button id="mobileCommonNavBtn" class="mobile-nav-btn" type="button">其它</button>
+              <button id="mobileCommonNavBtn" class="mobile-nav-btn" type="button">常用</button>
+              <button id="mobileBackupNavBtn" class="mobile-nav-btn" type="button">备份</button>
+              <button id="mobileLinksNavBtn" class="mobile-nav-btn" type="button">快捷</button>
               <button id="mobileSettingsNavBtn" class="mobile-nav-btn" type="button">设置</button>
-              <button id="mobileRefreshBtn" class="mobile-nav-btn mobile-nav-action" type="button">刷新</button>
-              <button id="mobileDateNavBtn" class="mobile-nav-btn mobile-nav-toggle" type="button">日期</button>
-              <button id="mobileFilterNavBtn" class="mobile-nav-btn mobile-nav-toggle" type="button">标签</button>
             </nav>
 
             <div class="topbar-copy">
@@ -120,7 +127,7 @@
               <div class="other-grid">
                 <section class="panel minimalist-panel">
                   <div class="section-head">
-                    <span>常用分类</span>
+                    <span>常用</span>
                     <span id="commonCount" class="count-chip">0</span>
                   </div>
                   <section id="commonRecordsList" class="cards-grid compact-grid"></section>
@@ -142,6 +149,65 @@
               </div>
             </section>
 
+            <section id="assetsPage" class="page-view page-scroll hidden">
+              <section class="panel minimalist-panel asset-intake-panel">
+                <div class="section-head">
+                  <span id="assetsPageHeading">备份库</span>
+                  <span id="assetsCount" class="count-chip">0</span>
+                </div>
+
+                <div class="asset-toolbar">
+                  <div id="assetDropZone" class="asset-dropzone" tabindex="0">
+                    <strong id="assetDropTitle">拖入文件或文件夹</strong>
+                    <span id="assetDropHint">松手后自动导入当前页面</span>
+                  </div>
+
+                  <div class="asset-toolbar-actions">
+                    <button id="pickAssetFilesBtn" class="text-action" type="button">选择文件</button>
+                    <button id="pickAssetFoldersBtn" class="text-action" type="button">选择文件夹</button>
+                  </div>
+                </div>
+
+                <div class="asset-filter-row">
+                  <label class="control-card search-card asset-search-card">
+                    <span class="control-label">搜索资源</span>
+                    <input id="assetSearchInput" class="search-input" type="text" placeholder="搜索文件名 / 路径 / 备注" />
+                  </label>
+
+                  <div id="assetTypeFilterBar" class="filter-bar asset-type-filter"></div>
+                </div>
+              </section>
+
+              <section class="resource-workbench">
+                <section id="assetsList" class="cards-grid"></section>
+
+                <aside id="assetDetailPanel" class="panel minimalist-panel asset-detail-panel">
+                  <div class="section-head">
+                    <span id="assetDetailTitle">资源详情</span>
+                    <span id="assetDetailStatus" class="count-chip">未选择</span>
+                  </div>
+
+                  <div id="assetDetailEmpty" class="asset-detail-empty">点击左侧卡片查看详情并编辑备注。</div>
+
+                  <div id="assetDetailBody" class="asset-detail-body hidden">
+                    <div id="assetDetailMeta" class="asset-detail-meta"></div>
+                    <div id="assetDetailPaths" class="asset-detail-paths"></div>
+                    <label class="asset-note-editor">
+                      <span>备注</span>
+                      <textarea id="assetNoteInput" rows="6" placeholder="为这个资源补充说明、用途或关键词"></textarea>
+                    </label>
+                    <div class="asset-detail-actions">
+                      <button id="assetOpenPrimaryBtn" class="text-action" type="button">打开资源</button>
+                      <button id="assetOpenSourceBtn" class="text-action" type="button">打开原位置</button>
+                      <button id="assetOpenLocationBtn" class="text-action" type="button">打开所在位置</button>
+                      <button id="assetSaveNoteBtn" class="text-action" type="button">保存备注</button>
+                      <button id="assetDeleteBtn" class="text-action danger" type="button">删除资源</button>
+                    </div>
+                  </div>
+                </aside>
+              </section>
+            </section>
+
             <section id="settingsPage" class="page-view page-scroll hidden">
               <section class="panel minimalist-panel settings-panel">
                 <div class="section-head settings-head">
@@ -152,7 +218,7 @@
                 <div class="settings-list">
                   <label class="setting-row"><span>自动判断</span><input id="autoJudgmentEnabled" type="checkbox" /></label>
                   <label class="setting-row"><span>Alt+Q</span><input id="altQEnabled" type="checkbox" /></label>
-                  <label class="setting-row"><span>双复制</span><input id="doubleCopyEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>累计复制</span><input id="doubleCopyEnabled" type="checkbox" /></label>
                   <label class="setting-row"><span>复制后按键</span><input id="copyThenKeyEnabled" type="checkbox" /></label>
                   <label class="setting-row"><span>开机启动</span><input id="startupLaunchEnabled" type="checkbox" /></label>
                   <label class="setting-row"><span>悬浮图标</span><input id="floatingIconEnabled" type="checkbox" /></label>
