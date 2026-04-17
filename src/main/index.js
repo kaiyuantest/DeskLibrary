@@ -16,6 +16,9 @@ const COPY_SHORTCUT_MAX_RETRIES = 15;
 const SHORTCUT_POLL_SUPPRESS_MS = 1000;
 const FLOATING_WINDOW_SIZE = 56;
 const FLOATING_WINDOW_MARGIN = 12;
+const FLOATING_VISIBLE_SLIVER = 16;
+const FLOATING_SLIDE_STEP = 8;
+const FLOATING_SLIDE_INTERVAL_MS = 10;
 
 let mainWindow = null;
 let floatingWindow = null;
@@ -35,6 +38,11 @@ let pressedKeys = {
   ctrl: false,
   alt: false
 };
+let floatingSlideTimer = null;
+let floatingDragState = null;
+let floatingHovered = false;
+let floatingPinnedVisible = false;
+let floatingBoundsCache = null;
 
 function getLoginItemConfig(enabled) {
   const base = {
@@ -109,7 +117,7 @@ function createWindow() {
   mainWindow = new BrowserWindow({
     width: 860,
     height: 620,
-    minWidth: 720,
+    minWidth: 360,
     minHeight: 520,
     frame: false,
     backgroundColor: '#e9edf5',
@@ -137,22 +145,89 @@ function createWindow() {
   });
 }
 
-function positionFloatingWindow() {
-  if (!floatingWindow || floatingWindow.isDestroyed()) return;
+function getFloatingBounds(mode = 'hidden') {
   const settings = getSettings();
-  const display = screen.getPrimaryDisplay();
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
   const workArea = display.workArea;
-  const x = workArea.x + workArea.width - FLOATING_WINDOW_SIZE - FLOATING_WINDOW_MARGIN;
-  const centeredY = workArea.y + Math.round((workArea.height - FLOATING_WINDOW_SIZE) / 2);
-  const y = settings.dockToEdgeEnabled
-    ? centeredY
+  const side = settings.floatingDockSide === 'left' ? 'left' : 'right';
+  const offsetY = Number.isFinite(settings.floatingOffsetY) ? settings.floatingOffsetY : null;
+  const maxY = workArea.y + workArea.height - FLOATING_WINDOW_SIZE - FLOATING_WINDOW_MARGIN;
+  const fallbackY = settings.dockToEdgeEnabled
+    ? workArea.y + Math.round((workArea.height - FLOATING_WINDOW_SIZE) / 2)
     : workArea.y + workArea.height - FLOATING_WINDOW_SIZE - 96;
-  floatingWindow.setBounds({
+  const y = Math.min(maxY, Math.max(workArea.y + FLOATING_WINDOW_MARGIN, offsetY === null ? fallbackY : workArea.y + offsetY));
+
+  let x = workArea.x + workArea.width - FLOATING_WINDOW_SIZE - FLOATING_WINDOW_MARGIN;
+  if (settings.dockToEdgeEnabled) {
+    if (side === 'left') {
+      x = mode === 'visible'
+        ? workArea.x + FLOATING_WINDOW_MARGIN
+        : workArea.x - FLOATING_WINDOW_SIZE + FLOATING_VISIBLE_SLIVER;
+    } else {
+      x = mode === 'visible'
+        ? workArea.x + workArea.width - FLOATING_WINDOW_SIZE - FLOATING_WINDOW_MARGIN
+        : workArea.x + workArea.width - FLOATING_VISIBLE_SLIVER;
+    }
+  }
+
+  return {
     x,
     y,
     width: FLOATING_WINDOW_SIZE,
     height: FLOATING_WINDOW_SIZE
-  });
+  };
+}
+
+function stopFloatingAnimation() {
+  if (floatingSlideTimer) {
+    clearInterval(floatingSlideTimer);
+    floatingSlideTimer = null;
+  }
+}
+
+function animateFloatingWindow(mode = 'hidden') {
+  if (!floatingWindow || floatingWindow.isDestroyed()) return;
+  stopFloatingAnimation();
+  const target = getFloatingBounds(mode);
+  const current = floatingWindow.getBounds();
+  if (current.x === target.x && current.y === target.y) {
+    floatingBoundsCache = target;
+    return;
+  }
+
+  floatingSlideTimer = setInterval(() => {
+    if (!floatingWindow || floatingWindow.isDestroyed()) {
+      stopFloatingAnimation();
+      return;
+    }
+
+    const next = floatingWindow.getBounds();
+    const deltaX = target.x - next.x;
+    const deltaY = target.y - next.y;
+    const stepX = Math.abs(deltaX) <= FLOATING_SLIDE_STEP ? deltaX : Math.sign(deltaX) * FLOATING_SLIDE_STEP;
+    const stepY = Math.abs(deltaY) <= FLOATING_SLIDE_STEP ? deltaY : Math.sign(deltaY) * FLOATING_SLIDE_STEP;
+    const updated = {
+      x: next.x + stepX,
+      y: next.y + stepY,
+      width: FLOATING_WINDOW_SIZE,
+      height: FLOATING_WINDOW_SIZE
+    };
+    floatingWindow.setBounds(updated);
+
+    if (updated.x === target.x && updated.y === target.y) {
+      floatingBoundsCache = target;
+      stopFloatingAnimation();
+    }
+  }, FLOATING_SLIDE_INTERVAL_MS);
+}
+
+function positionFloatingWindow() {
+  if (!floatingWindow || floatingWindow.isDestroyed()) return;
+  const mode = getSettings().dockToEdgeEnabled && !floatingHovered && !floatingPinnedVisible ? 'hidden' : 'visible';
+  const bounds = getFloatingBounds(mode);
+  stopFloatingAnimation();
+  floatingBoundsCache = bounds;
+  floatingWindow.setBounds(bounds);
 }
 
 function createFloatingWindow() {
@@ -213,8 +288,13 @@ function syncFloatingWindowVisibility() {
   if (!floatingWindow || floatingWindow.isDestroyed()) return;
   try {
     const settings = getSettings();
-    positionFloatingWindow();
+    const mode = settings.dockToEdgeEnabled && !floatingHovered && !floatingPinnedVisible ? 'hidden' : 'visible';
     if (settings.floatingIconEnabled) {
+      if (settings.dockToEdgeEnabled) {
+        animateFloatingWindow(mode);
+      } else {
+        positionFloatingWindow();
+      }
       if (floatingWindow.webContents && !floatingWindow.webContents.isLoading()) {
         floatingWindow.showInactive();
       } else {
@@ -272,7 +352,7 @@ function normalizeRecord(record) {
       : (path.basename(record.imagePath || '') || '图片记录'),
     preview: record.contentType === 'text'
       ? (((record.textContent || '').length > 120) ? `${record.textContent.slice(0, 120)}...` : (record.textContent || ''))
-      : '剪贴板图片已保存到本地',
+      : '',
     createdAtDisplay: new Date(record.createdAt).toLocaleString('zh-CN', { hour12: false }),
     lastCapturedAtDisplay: new Date(lastCapturedAt).toLocaleString('zh-CN', { hour12: false })
   };
@@ -739,6 +819,72 @@ function setupIpc() {
 
   ipcMain.handle('open-main-window', async () => {
     showWindow();
+    return { ok: true };
+  });
+
+  ipcMain.handle('floating-set-hovered', async (_, hovered) => {
+    floatingHovered = !!hovered;
+    const settings = getSettings();
+    if (!settings.floatingIconEnabled || !settings.dockToEdgeEnabled || floatingDragState) {
+      return { ok: true };
+    }
+    animateFloatingWindow(floatingHovered ? 'visible' : 'hidden');
+    return { ok: true };
+  });
+
+  ipcMain.handle('floating-drag-start', async (_, payload = {}) => {
+    if (!floatingWindow || floatingWindow.isDestroyed()) return { ok: false };
+    stopFloatingAnimation();
+    floatingPinnedVisible = true;
+    floatingHovered = true;
+    floatingDragState = {
+      offsetX: Number(payload.offsetX) || 0,
+      offsetY: Number(payload.offsetY) || 0
+    };
+    return { ok: true };
+  });
+
+  ipcMain.handle('floating-drag-move', async (_, payload = {}) => {
+    if (!floatingWindow || floatingWindow.isDestroyed() || !floatingDragState) return { ok: false };
+    const display = screen.getDisplayNearestPoint({ x: Number(payload.screenX) || 0, y: Number(payload.screenY) || 0 });
+    const workArea = display.workArea;
+    const nextX = Math.min(
+      workArea.x + workArea.width - FLOATING_WINDOW_SIZE,
+      Math.max(workArea.x, (Number(payload.screenX) || 0) - floatingDragState.offsetX)
+    );
+    const nextY = Math.min(
+      workArea.y + workArea.height - FLOATING_WINDOW_SIZE,
+      Math.max(workArea.y, (Number(payload.screenY) || 0) - floatingDragState.offsetY)
+    );
+    floatingWindow.setBounds({
+      x: nextX,
+      y: nextY,
+      width: FLOATING_WINDOW_SIZE,
+      height: FLOATING_WINDOW_SIZE
+    });
+    return { ok: true };
+  });
+
+  ipcMain.handle('floating-drag-end', async () => {
+    if (!floatingWindow || floatingWindow.isDestroyed()) return { ok: false };
+    const bounds = floatingWindow.getBounds();
+    const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y });
+    const workArea = display.workArea;
+    const side = bounds.x + (FLOATING_WINDOW_SIZE / 2) < workArea.x + (workArea.width / 2) ? 'left' : 'right';
+    const nextSettings = storage.saveSettings({
+      ...getSettings(),
+      floatingDockSide: side,
+      floatingOffsetY: Math.max(0, bounds.y - workArea.y)
+    });
+    floatingDragState = null;
+    floatingPinnedVisible = false;
+    floatingHovered = false;
+    if (nextSettings.dockToEdgeEnabled) {
+      animateFloatingWindow('hidden');
+    } else {
+      positionFloatingWindow();
+    }
+    sendSnapshot('悬浮图标位置已更新');
     return { ok: true };
   });
 

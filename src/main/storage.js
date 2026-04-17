@@ -22,7 +22,9 @@ class StorageService {
       postCopyKey: 'Shift',
       startupLaunchEnabled: false,
       floatingIconEnabled: false,
-      dockToEdgeEnabled: true
+      dockToEdgeEnabled: true,
+      floatingDockSide: 'right',
+      floatingOffsetY: null
     });
     this.ensureFile(this.duplicateFile, {});
   }
@@ -75,6 +77,8 @@ class StorageService {
       startupLaunchEnabled: false,
       floatingIconEnabled: false,
       dockToEdgeEnabled: true,
+      floatingDockSide: 'right',
+      floatingOffsetY: null,
       ...this.readJson(this.settingsFile, {})
     };
   }

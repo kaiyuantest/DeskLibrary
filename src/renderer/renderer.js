@@ -10,7 +10,9 @@ const state = {
   pageSize: 12,
   selectedRecordId: null,
   statusText: '后台监听中',
-  modalOpen: false
+  modalOpen: false,
+  mobileDateToolsOpen: false,
+  mobileFilterToolsOpen: false
 };
 
 const els = {
@@ -22,12 +24,22 @@ const els = {
   dailyPageBtn: document.getElementById('dailyPageBtn'),
   commonPageBtn: document.getElementById('commonPageBtn'),
   settingsPageBtn: document.getElementById('settingsPageBtn'),
+  mobileDailyNavBtn: document.getElementById('mobileDailyNavBtn'),
+  mobileCommonNavBtn: document.getElementById('mobileCommonNavBtn'),
+  mobileSettingsNavBtn: document.getElementById('mobileSettingsNavBtn'),
+  mobileRefreshBtn: document.getElementById('mobileRefreshBtn'),
+  mobileDateNavBtn: document.getElementById('mobileDateNavBtn'),
+  mobileFilterNavBtn: document.getElementById('mobileFilterNavBtn'),
   refreshBtn: document.getElementById('refreshBtn'),
   dailyPage: document.getElementById('dailyPage'),
   commonPage: document.getElementById('commonPage'),
   settingsPage: document.getElementById('settingsPage'),
   dailySearchInput: document.getElementById('dailySearchInput'),
   dailyDatePicker: document.getElementById('dailyDatePicker'),
+  mobileDateToggleBtn: document.getElementById('mobileDateToggleBtn'),
+  mobileFilterToggleBtn: document.getElementById('mobileFilterToggleBtn'),
+  dateCard: document.querySelector('.date-card'),
+  filterCard: document.querySelector('.filter-card'),
   dailyFilterBar: document.getElementById('dailyFilterBar'),
   recordsList: document.getElementById('recordsList'),
   dailyPagination: document.getElementById('dailyPagination'),
@@ -166,12 +178,24 @@ function render() {
   els.dailySearchInput.value = state.searchKeyword;
   els.dailyDatePicker.value = state.selectedCalendarDate;
   renderPage();
+  renderMobileTools();
   renderFilters();
   renderQuickSections();
   renderDailyRecords();
   renderCommonRecords();
   renderModal();
   renderSettings();
+}
+
+function renderMobileTools() {
+  const dateOpen = !!state.mobileDateToolsOpen;
+  const filterOpen = !!state.mobileFilterToolsOpen;
+  els.mobileDateToggleBtn.classList.toggle('active', dateOpen);
+  els.mobileFilterToggleBtn.classList.toggle('active', filterOpen);
+  els.mobileDateNavBtn?.classList.toggle('active', dateOpen);
+  els.mobileFilterNavBtn?.classList.toggle('active', filterOpen);
+  els.dateCard.classList.toggle('mobile-open', dateOpen);
+  els.filterCard.classList.toggle('mobile-open', filterOpen);
 }
 
 function renderPage() {
@@ -184,6 +208,11 @@ function renderPage() {
   els.dailyPageBtn.classList.toggle('active', current === 'daily');
   els.commonPageBtn.classList.toggle('active', current === 'common');
   els.settingsPageBtn.classList.toggle('active', current === 'settings');
+  if (els.mobileDailyNavBtn) {
+    els.mobileDailyNavBtn.classList.toggle('active', current === 'daily');
+    els.mobileCommonNavBtn.classList.toggle('active', current === 'common');
+    els.mobileSettingsNavBtn.classList.toggle('active', current === 'settings');
+  }
 }
 
 function renderFilters() {
@@ -197,6 +226,7 @@ function renderFilters() {
       state.selectedFilter = item;
       state.selectedCalendarDate = item === '全部' ? '' : item;
       state.currentPageNumber = 1;
+      state.mobileFilterToolsOpen = false;
       render();
     };
     els.dailyFilterBar.appendChild(button);
@@ -227,7 +257,7 @@ function renderRecordList(container, records) {
   container.innerHTML = '';
   records.forEach((record) => {
     const item = document.createElement('article');
-    item.className = `record-item ${record.id === state.selectedRecordId ? 'active' : ''}`;
+    item.className = `record-item ${record.contentType === 'image' ? 'is-image' : 'is-text'} ${record.id === state.selectedRecordId ? 'active' : ''}`;
     item.tabIndex = 0;
     item.innerHTML = buildRecordCard(record);
     item.onclick = () => {
@@ -438,6 +468,9 @@ function switchPage(page) {
 els.dailyPageBtn.addEventListener('click', () => switchPage('daily'));
 els.commonPageBtn.addEventListener('click', () => switchPage('common'));
 els.settingsPageBtn.addEventListener('click', () => switchPage('settings'));
+els.mobileDailyNavBtn?.addEventListener('click', () => switchPage('daily'));
+els.mobileCommonNavBtn?.addEventListener('click', () => switchPage('common'));
+els.mobileSettingsNavBtn?.addEventListener('click', () => switchPage('settings'));
 els.windowMinBtn.addEventListener('click', () => window.click2save.minimizeWindow());
 els.windowMaxBtn.addEventListener('click', async () => {
   const result = await window.click2save.toggleMaximizeWindow();
@@ -448,6 +481,30 @@ els.windowCloseBtn.addEventListener('click', () => window.click2save.closeWindow
 els.refreshBtn.addEventListener('click', async () => {
   applySnapshot(await window.click2save.getInitialData());
 });
+els.mobileRefreshBtn?.addEventListener('click', async () => {
+  applySnapshot(await window.click2save.getInitialData());
+});
+
+function toggleMobileDateTools() {
+  state.mobileDateToolsOpen = !state.mobileDateToolsOpen;
+  if (state.mobileDateToolsOpen) {
+    state.mobileFilterToolsOpen = false;
+  }
+  render();
+}
+
+function toggleMobileFilterTools() {
+  state.mobileFilterToolsOpen = !state.mobileFilterToolsOpen;
+  if (state.mobileFilterToolsOpen) {
+    state.mobileDateToolsOpen = false;
+  }
+  render();
+}
+
+els.mobileDateToggleBtn.addEventListener('click', toggleMobileDateTools);
+els.mobileFilterToggleBtn.addEventListener('click', toggleMobileFilterTools);
+els.mobileDateNavBtn?.addEventListener('click', toggleMobileDateTools);
+els.mobileFilterNavBtn?.addEventListener('click', toggleMobileFilterTools);
 
 els.dailySearchInput.addEventListener('input', (event) => {
   state.searchKeyword = event.target.value || '';
@@ -459,6 +516,7 @@ els.dailyDatePicker.addEventListener('change', (event) => {
   state.selectedCalendarDate = event.target.value || '';
   state.selectedFilter = state.selectedCalendarDate || '全部';
   state.currentPageNumber = 1;
+  state.mobileDateToolsOpen = false;
   render();
 });
 
