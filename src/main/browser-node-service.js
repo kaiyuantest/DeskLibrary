@@ -253,7 +253,7 @@ async function unprotectWindowsData(buffer) {
     "$bytes=[Convert]::FromBase64String($b64)",
     "$out=[Security.Cryptography.ProtectedData]::Unprotect($bytes,$null,[Security.Cryptography.DataProtectionScope]::CurrentUser)",
     "[Console]::Write([Convert]::ToBase64String($out))"
-  ].join(';');
+  ].join('\r\n');
   const stdout = await execPowerShell(script, [cacheKey], 12000);
   const decoded = Buffer.from(String(stdout || '').trim(), 'base64');
   dpapiDecryptCache.set(cacheKey, decoded);
@@ -376,6 +376,57 @@ function sameSiteToDbValue(value) {
   return 0;
 }
 
+function normalizeSourceSchemeForCdp(value, secure = false) {
+  if (value === undefined || value === null || value === '') {
+    return '';
+  }
+  if (value === 0 || value === '0' || /unset/i.test(String(value))) {
+    return 'Unset';
+  }
+  if (value === 1 || value === '1' || /non.?secure/i.test(String(value))) {
+    return 'NonSecure';
+  }
+  if (value === 2 || value === '2' || /secure/i.test(String(value))) {
+    return 'Secure';
+  }
+  return secure ? 'Secure' : 'NonSecure';
+}
+
+function isCookieDomainMatch(hostname, cookieDomain) {
+  const host = String(hostname || '').trim().toLowerCase();
+  const domain = String(cookieDomain || '').trim().toLowerCase().replace(/^\./, '');
+  if (!host || !domain) {
+    return false;
+  }
+  return host === domain || host.endsWith(`.${domain}`);
+}
+
+function buildCookieUrl(cookie, fallbackUrl = '') {
+  const pathValue = String(cookie?.path || '/').startsWith('/') ? String(cookie?.path || '/') : `/${String(cookie?.path || '')}`;
+  const secure = !!cookie?.secure;
+  const domain = String(cookie?.domain || '').trim().replace(/^\./, '');
+  if (fallbackUrl) {
+    try {
+      const parsed = new URL(fallbackUrl);
+      if (!domain || isCookieDomainMatch(parsed.hostname, domain)) {
+        parsed.protocol = secure ? 'https:' : 'http:';
+        parsed.pathname = pathValue;
+        parsed.search = '';
+        parsed.hash = '';
+        return parsed.toString();
+      }
+    } catch {}
+  }
+  if (!domain) {
+    return '';
+  }
+  try {
+    return new URL(`${secure ? 'https' : 'http'}://${domain}${pathValue}`).toString();
+  } catch {
+    return '';
+  }
+}
+
 function normalizeCookie(cookie, fallbackUrl = '') {
   const normalized = {
     name: String(cookie?.name || ''),
@@ -421,6 +472,16 @@ function normalizeCookie(cookie, fallbackUrl = '') {
   }
   if (!normalized.path) {
     normalized.path = '/';
+  }
+  const cookieUrl = buildCookieUrl(normalized, fallbackUrl);
+  if (cookieUrl) {
+    normalized.url = cookieUrl;
+  }
+  const sourceScheme = normalizeSourceSchemeForCdp(normalized.sourceScheme, normalized.secure);
+  if (sourceScheme) {
+    normalized.sourceScheme = sourceScheme;
+  } else {
+    delete normalized.sourceScheme;
   }
   return normalized;
 }
@@ -969,14 +1030,106 @@ async function scanBrowserCards(options = {}) {
   return { ok: true, results, candidates, selfBuiltRoot };
 }
 
-async function getDevtoolsWsUrl(port) {
+function isDomainMatchForFilter(candidate, expected) {
+  const left = String(candidate || '').trim().toLowerCase().replace(/^\./, '');
+  const right = String(expected || '').trim().toLowerCase().replace(/^\./, '');
+  if (!left || !right) {
+    return false;
+  }
+  return left === right || left.endsWith(`.${right}`) || right.endsWith(`.${left}`);
+}
+
+async function getDevtoolsWsUrl(port, preferredDomain = '') {
   const payload = await fetchJson(`http://127.0.0.1:${port}/json`, {}, 4000);
   const pages = Array.isArray(payload.data) ? payload.data : [];
-  const page = pages.find((item) => item?.type === 'page' && item?.webSocketDebuggerUrl) || pages.find((item) => item?.webSocketDebuggerUrl);
+  let page = null;
+  const expected = String(preferredDomain || '').trim().toLowerCase();
+  if (expected) {
+    page = pages.find((item) => {
+      if (item?.type !== 'page' || !item?.webSocketDebuggerUrl || !item?.url) {
+        return false;
+      }
+      try {
+        return isDomainMatchForFilter(new URL(String(item.url)).hostname, expected);
+      } catch {
+        return false;
+      }
+    }) || null;
+  }
+  if (!page) {
+    page = pages.find((item) => item?.type === 'page' && item?.webSocketDebuggerUrl) || pages.find((item) => item?.webSocketDebuggerUrl);
+  }
   if (!page?.webSocketDebuggerUrl) {
     throw new Error('未找到可用的 DevTools 页面连接');
   }
   return page.webSocketDebuggerUrl;
+}
+
+async function readCookiesViaCdp(port, preferredDomain = '') {
+  const wsUrl = await getDevtoolsWsUrl(port, preferredDomain);
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-cdp-read-'));
+  const payloadFile = path.join(tempDir, 'payload.json');
+  const script = [
+    "param([string]$payloadPath)",
+    "$ErrorActionPreference='Stop'",
+    "$ProgressPreference='SilentlyContinue'",
+    "$ws=$null",
+    "$enc=[Text.Encoding]::UTF8",
+    "function Write-Json($obj){ [Console]::Out.Write(($obj | ConvertTo-Json -Depth 16 -Compress)) }",
+    "function Send-Cdp($method,$params){",
+    "  $script:msgId++",
+    "  $body=@{id=$script:msgId;method=$method;params=$params} | ConvertTo-Json -Depth 16 -Compress",
+    "  $bytes=$enc.GetBytes($body)",
+    "  $seg=[ArraySegment[byte]]::new($bytes)",
+    "  $ws.SendAsync($seg,[System.Net.WebSockets.WebSocketMessageType]::Text,$true,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "  while($true){",
+    "    $buffer=New-Object byte[] 524288",
+    "    $ms=New-Object IO.MemoryStream",
+    "    do {",
+    "      $res=$ws.ReceiveAsync([ArraySegment[byte]]::new($buffer),[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "      if($res.Count -gt 0){ $ms.Write($buffer,0,$res.Count) }",
+    "    } while(-not $res.EndOfMessage)",
+    "    $text=$enc.GetString($ms.ToArray())",
+    "    if(-not $text){ continue }",
+    "    $obj=$text | ConvertFrom-Json",
+    "    if($obj.id -eq $script:msgId){ return $obj }",
+    "  }",
+    "}",
+    "try {",
+    "  $payload=Get-Content -LiteralPath $payloadPath -Raw | ConvertFrom-Json",
+    "  $ws=New-Object System.Net.WebSockets.ClientWebSocket",
+    "  $uri=[Uri]$payload.wsUrl",
+    "  $ws.ConnectAsync($uri,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "  $script:msgId=0",
+    "  [void](Send-Cdp 'Network.enable' @{})",
+    "  $resp=Send-Cdp 'Network.getAllCookies' @{}",
+    "  $items=@()",
+    "  if($resp.result -and $resp.result.cookies){ $items=@($resp.result.cookies) }",
+    "  Write-Json @{cookies=$items}",
+    "} catch {",
+    "  $message='CDP cookie read failed'",
+    "  if($_.Exception -and $_.Exception.Message){ $message=[string]$_.Exception.Message }",
+    "  Write-Json @{error=$message;cookies=@()}",
+    "} finally {",
+    "  if($ws -and (($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) -or ($ws.State -eq [System.Net.WebSockets.WebSocketState]::CloseReceived))){",
+    "    try { $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',[Threading.CancellationToken]::None).GetAwaiter().GetResult() } catch {}",
+    "  }",
+    "  if($ws){ $ws.Dispose() }",
+    "}"
+  ].join('\r\n');
+  try {
+    fs.writeFileSync(payloadFile, JSON.stringify({ wsUrl }), 'utf8');
+    const stdout = await execPowerShell(script, [payloadFile]);
+    const parsed = JSON.parse(String(stdout || '').trim() || '{}');
+    if (parsed?.error) {
+      throw new Error(String(parsed.error));
+    }
+    return ensureArray(parsed?.cookies);
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  }
 }
 
 async function runCdpScript(payload) {
@@ -984,13 +1137,11 @@ async function runCdpScript(payload) {
   const payloadFile = path.join(tempDir, 'payload.json');
   const script = [
     "param([string]$payloadPath)",
-    "$payload=Get-Content -LiteralPath $payloadPath -Raw | ConvertFrom-Json",
-    "$cookies=@($payload.cookies)",
-    "$ws=New-Object System.Net.WebSockets.ClientWebSocket",
-    "$uri=[Uri]$payload.wsUrl",
-    "$ws.ConnectAsync($uri,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "$ErrorActionPreference='Stop'",
+    "$ProgressPreference='SilentlyContinue'",
+    "$ws=$null",
     "$enc=[Text.Encoding]::UTF8",
-    "$msgId=0",
+    "function Write-Json($obj){ [Console]::Out.Write(($obj | ConvertTo-Json -Depth 16 -Compress)) }",
     "function Send-Cdp($method,$params){",
     "  $script:msgId++",
     "  $body=@{id=$script:msgId;method=$method;params=$params} | ConvertTo-Json -Depth 16 -Compress",
@@ -1010,45 +1161,111 @@ async function runCdpScript(payload) {
     "    if($obj.id -eq $script:msgId){ return $obj }",
     "  }",
     "}",
-    "[void](Send-Cdp 'Network.enable' @{})",
-    "[void](Send-Cdp 'Page.enable' @{})",
-    "$ok=0",
-    "$fail=0",
-    "foreach($cookie in $cookies){",
-    "  $pathValue='/'",
-    "  if($cookie.path){ $pathValue=[string]$cookie.path }",
-    "  $params=@{",
-    "    name=[string]$cookie.name;",
-    "    value=[string]$cookie.value;",
-    "    domain=[string]$cookie.domain;",
-    "    path=$pathValue;",
-    "    secure=[bool]$cookie.secure;",
-    "    httpOnly=[bool]$cookie.httpOnly",
+    "function Copy-Map($map){ $copy=@{}; foreach($key in $map.Keys){ $copy[$key]=$map[$key] }; return $copy }",
+    "function Remove-Keys($map,[string[]]$keys){ $copy=Copy-Map $map; foreach($key in $keys){ if($copy.ContainsKey($key)){ [void]$copy.Remove($key) } }; return $copy }",
+    "function Get-CdpError($resp){",
+    "  if($resp.error){",
+    "    if($resp.error.message){ return [string]$resp.error.message }",
+    "    if($resp.error.code){ return [string]$resp.error.code }",
+    "    return 'CDP error'",
     "  }",
-    "  if($cookie.expiry){ $params.expires=[double]$cookie.expiry }",
-    "  if($cookie.sameSite){ $params.sameSite=[string]$cookie.sameSite }",
-    "  if($cookie.sourceScheme -ne $null -and $cookie.sourceScheme -ne ''){ $params.sourceScheme=[int]$cookie.sourceScheme }",
-    "  if($cookie.sourcePort -ne $null -and $cookie.sourcePort -ne ''){ $params.sourcePort=[int]$cookie.sourcePort }",
-    "  if($cookie.isPartitioned){ $params.partitionKey=@{topLevelSite=[string]$cookie.topFrameSiteKey} }",
-    "  $resp=Send-Cdp 'Network.setCookie' $params",
-    "  if($resp.result.success){",
-    "    $ok++",
-    "  } elseif($params.domain.StartsWith('.')) {",
-    "    $params.domain=$params.domain.Substring(1)",
-    "    $resp2=Send-Cdp 'Network.setCookie' $params",
-    "    if($resp2.result.success){ $ok++ } else { $fail++ }",
-    "  } else {",
-    "    $fail++",
+    "  if($resp.result -and $resp.result.success -eq $false){",
+    "    if($resp.result.errorText){ return [string]$resp.result.errorText }",
+    "    return 'Network.setCookie returned success=false'",
     "  }",
+    "  return ''",
     "}",
-    "if($payload.url){ [void](Send-Cdp 'Page.navigate' @{url=[string]$payload.url}) }",
-    "$ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
-    "@{ok=$ok;fail=$fail} | ConvertTo-Json -Compress"
-  ].join(';');
+    "function Invoke-SetCookie($params){",
+    "  $lastError=''",
+    "  $attempts=New-Object System.Collections.Generic.List[hashtable]",
+    "  $attempts.Add((Copy-Map $params))",
+    "  if($params.ContainsKey('domain') -and [string]$params.domain -and [string]$params.domain.StartsWith('.')){",
+    "    $trimmed=Copy-Map $params",
+    "    $trimmed.domain=([string]$trimmed.domain).Substring(1)",
+    "    $attempts.Add($trimmed)",
+    "  }",
+    "  $reduced=Remove-Keys $params @('partitionKey','sourceScheme','sourcePort')",
+    "  $attempts.Add($reduced)",
+    "  if($reduced.ContainsKey('domain') -and [string]$reduced.domain -and [string]$reduced.domain.StartsWith('.')){",
+    "    $trimmedReduced=Copy-Map $reduced",
+    "    $trimmedReduced.domain=([string]$trimmedReduced.domain).Substring(1)",
+    "    $attempts.Add($trimmedReduced)",
+    "  }",
+    "  $urlOnly=Remove-Keys $reduced @('domain','sameSite')",
+    "  $attempts.Add($urlOnly)",
+    "  foreach($attempt in $attempts){",
+    "    if(((-not $attempt.ContainsKey('domain')) -or (-not [string]$attempt.domain)) -and ((-not $attempt.ContainsKey('url')) -or (-not [string]$attempt.url))){ continue }",
+    "    $resp=Send-Cdp 'Network.setCookie' $attempt",
+    "    if($resp.result.success){ return @{success=$true; error=''} }",
+    "    $err=Get-CdpError $resp",
+    "    if($err){ $lastError=$err }",
+    "  }",
+    "  if(-not $lastError){ $lastError='Network.setCookie returned success=false' }",
+    "  return @{success=$false; error=$lastError}",
+    "}",
+    "try {",
+    "  $payload=Get-Content -LiteralPath $payloadPath -Raw | ConvertFrom-Json",
+    "  $cookies=@($payload.cookies)",
+    "  $ws=New-Object System.Net.WebSockets.ClientWebSocket",
+    "  $uri=[Uri]$payload.wsUrl",
+    "  $ws.ConnectAsync($uri,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "  $script:msgId=0",
+    "  [void](Send-Cdp 'Network.enable' @{})",
+    "  [void](Send-Cdp 'Page.enable' @{})",
+    "  $ok=0",
+    "  $fail=0",
+    "  $errors=New-Object System.Collections.Generic.List[string]",
+    "  foreach($cookie in $cookies){",
+    "    $pathValue='/'",
+    "    if($cookie.path){ $pathValue=[string]$cookie.path }",
+    "    $params=@{",
+    "      name=[string]$cookie.name;",
+    "      value=[string]$cookie.value;",
+    "      path=$pathValue;",
+    "      secure=[bool]$cookie.secure;",
+    "      httpOnly=[bool]$cookie.httpOnly",
+    "    }",
+    "    if($cookie.url){ $params.url=[string]$cookie.url }",
+    "    if($cookie.domain){ $params.domain=[string]$cookie.domain }",
+    "    if($cookie.expiry){ $params.expires=[double]$cookie.expiry }",
+    "    if($cookie.sameSite){ $params.sameSite=[string]$cookie.sameSite }",
+    "    if($cookie.sourceScheme -ne $null -and $cookie.sourceScheme -ne ''){ $params.sourceScheme=[string]$cookie.sourceScheme }",
+    "    if($cookie.sourcePort -ne $null -and $cookie.sourcePort -ne '' -and [int]$cookie.sourcePort -ge 0){ $params.sourcePort=[int]$cookie.sourcePort }",
+    "    if($cookie.isPartitioned -and $cookie.topFrameSiteKey){ $params.partitionKey=@{topLevelSite=[string]$cookie.topFrameSiteKey} }",
+    "    $setResult=Invoke-SetCookie $params",
+    "    if($setResult.success){",
+    "      $ok++",
+    "    } else {",
+    "      $fail++",
+    "      if($setResult.error -and -not $errors.Contains([string]$setResult.error)){ $errors.Add([string]$setResult.error) }",
+    "    }",
+    "  }",
+    "  if($payload.url){ [void](Send-Cdp 'Page.navigate' @{url=[string]$payload.url}) }",
+    "  Write-Json @{ok=$ok;fail=$fail;errors=@($errors)}",
+    "} catch {",
+    "  $message='CDP script failed'",
+    "  if($_.Exception -and $_.Exception.Message){ $message=[string]$_.Exception.Message }",
+    "  Write-Json @{ok=0;fail=0;errors=@($message)}",
+    "} finally {",
+    "  if($ws -and (($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) -or ($ws.State -eq [System.Net.WebSockets.WebSocketState]::CloseReceived))){",
+    "    try { $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',[Threading.CancellationToken]::None).GetAwaiter().GetResult() } catch {}",
+    "  }",
+    "  if($ws){ $ws.Dispose() }",
+    "}"
+  ].join('\r\n');
   try {
     fs.writeFileSync(payloadFile, JSON.stringify(payload), 'utf8');
     const stdout = await execPowerShell(script, [payloadFile]);
-    return JSON.parse(String(stdout || '{}').trim() || '{}');
+    const text = String(stdout || '').trim();
+    try {
+      return JSON.parse(text || '{}');
+    } catch {
+      const match = text.match(/\{[\s\S]*\}$/);
+      if (match) {
+        return JSON.parse(match[0]);
+      }
+      return { ok: 0, fail: 0, errors: [text || 'CDP 脚本未返回有效 JSON'] };
+    }
   } finally {
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1065,12 +1282,15 @@ async function injectCookies(port, url, cookies) {
   const result = await runCdpScript({ wsUrl, url: String(url || ''), cookies: normalized });
   const okCount = Number(result?.ok || 0);
   const failCount = Number(result?.fail || 0);
+  const errors = ensureArray(result?.errors).map((item) => String(item || '').trim()).filter(Boolean);
   if (!okCount) {
-    return { ok: false, message: '全部 Cookie 注入失败' };
+    return { ok: false, message: errors.length ? `全部 Cookie 注入失败: ${errors[0]}` : '全部 Cookie 注入失败' };
   }
   return {
     ok: true,
-    message: failCount ? `成功注入 ${okCount} 条，失败 ${failCount} 条` : `成功注入 ${okCount} 条`
+    message: failCount
+      ? `成功注入 ${okCount} 条，失败 ${failCount} 条${errors.length ? `，首个错误: ${errors[0]}` : ''}`
+      : `成功注入 ${okCount} 条`
   };
 }
 
