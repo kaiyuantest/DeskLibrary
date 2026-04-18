@@ -1161,6 +1161,25 @@ async function runCdpScript(payload) {
     "    if($obj.id -eq $script:msgId){ return $obj }",
     "  }",
     "}",
+    "function Normalize-Domain([string]$value){",
+    "  if(-not $value){ return '' }",
+    "  $d=[string]$value",
+    "  $d=$d.Trim().ToLowerInvariant()",
+    "  while($d.StartsWith('.')){ $d=$d.Substring(1) }",
+    "  return $d",
+    "}",
+    "function Domain-Matches([string]$candidate,[string[]]$hosts){",
+    "  $c=Normalize-Domain $candidate",
+    "  if(-not $c){ return $false }",
+    "  foreach($h0 in $hosts){",
+    "    $h=Normalize-Domain $h0",
+    "    if(-not $h){ continue }",
+    "    if($c -eq $h){ return $true }",
+    "    if($c.EndsWith('.'+$h)){ return $true }",
+    "    if($h.EndsWith('.'+$c)){ return $true }",
+    "  }",
+    "  return $false",
+    "}",
     "function Copy-Map($map){ $copy=@{}; foreach($key in $map.Keys){ $copy[$key]=$map[$key] }; return $copy }",
     "function Remove-Keys($map,[string[]]$keys){ $copy=Copy-Map $map; foreach($key in $keys){ if($copy.ContainsKey($key)){ [void]$copy.Remove($key) } }; return $copy }",
     "function Get-CdpError($resp){",
@@ -1206,6 +1225,8 @@ async function runCdpScript(payload) {
     "try {",
     "  $payload=Get-Content -LiteralPath $payloadPath -Raw | ConvertFrom-Json",
     "  $cookies=@($payload.cookies)",
+    "  $purgeHosts=@()",
+    "  if($payload.purgeHosts){ $purgeHosts=@($payload.purgeHosts) }",
     "  $ws=New-Object System.Net.WebSockets.ClientWebSocket",
     "  $uri=[Uri]$payload.wsUrl",
     "  $ws.ConnectAsync($uri,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
@@ -1215,6 +1236,20 @@ async function runCdpScript(payload) {
     "  $ok=0",
     "  $fail=0",
     "  $errors=New-Object System.Collections.Generic.List[string]",
+    "  if($payload.overwriteExisting -and $purgeHosts.Count -gt 0){",
+    "    try {",
+    "      $all=Send-Cdp 'Network.getAllCookies' @{}",
+    "      if($all.result -and $all.result.cookies){",
+    "        foreach($c in @($all.result.cookies)){",
+    "          if(-not $c){ continue }",
+    "          if(Domain-Matches ([string]$c.domain) $purgeHosts){",
+    "            $del=@{name=[string]$c.name; domain=[string]$c.domain; path=([string]$c.path)}",
+    "            [void](Send-Cdp 'Network.deleteCookies' $del)",
+    "          }",
+    "        }",
+    "      }",
+    "    } catch {}",
+    "  }",
     "  foreach($cookie in $cookies){",
     "    $pathValue='/'",
     "    if($cookie.path){ $pathValue=[string]$cookie.path }",
@@ -1285,7 +1320,19 @@ async function injectCookies(port, url, cookies) {
     return { ok: false, message: '没有可注入的 Cookie' };
   }
   const wsUrl = await getDevtoolsWsUrl(port);
-  const result = await runCdpScript({ wsUrl, url: String(url || ''), cookies: normalized, overwriteExisting: true });
+  let purgeHosts = [];
+  try {
+    const host = new URL(normalizeUrl(url)).hostname;
+    const rootBare = getRootDomain(host).replace(/^\.+/, '');
+    purgeHosts = [...new Set([host, rootBare].filter(Boolean))];
+  } catch {}
+  const result = await runCdpScript({
+    wsUrl,
+    url: String(url || ''),
+    cookies: normalized,
+    overwriteExisting: true,
+    purgeHosts
+  });
   const okCount = Number(result?.ok || 0);
   const failCount = Number(result?.fail || 0);
   const errors = ensureArray(result?.errors).map((item) => String(item || '').trim()).filter(Boolean);
@@ -1314,6 +1361,18 @@ async function dbWriteCookies(cookieDbPath, cookies, userDataDir) {
   try {
     fs.copyFileSync(cookieDbPath, tempDb);
     const statements = ['BEGIN TRANSACTION;'];
+    // 先按站点清理，避免旧 Cookie 残留（尤其是不同 path/子域）导致登录后立刻失效
+    const purgeDomains = new Set();
+    for (const cookie of normalized) {
+      const bare = String(cookie.domain || '').trim().toLowerCase().replace(/^\.+/, '');
+      if (!bare) continue;
+      purgeDomains.add(`.${bare}`);
+      purgeDomains.add(getRootDomain(bare));
+    }
+    for (const d of [...purgeDomains].filter(Boolean)) {
+      const bare = String(d).replace(/^\.+/, '');
+      statements.push(`DELETE FROM cookies WHERE host_key='${escapeSqlText(d)}' OR host_key LIKE '%.${escapeSqlText(bare)}';`);
+    }
     let count = 0;
     for (const cookie of normalized) {
       const encryptedValue = encryptCookieValue(masterKey, cookie.value);
