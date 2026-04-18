@@ -2,11 +2,10 @@ const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { runBrowserCommand, scanBrowserCards: scanBrowserCardsInNode } = require('./browser-node-service');
 
-const DEFAULT_SELF_BUILT_CANDIDATES = [
-  'E:\\project\\多账号管理项目\\cookie_manager\\cookie_manager (3)\\cookie_manager\\cookie_manager_v5\\cookie_manager'
-];
-const DEFAULT_PYTHON_COOKIE_PROJECT = 'E:\\project\\多账号管理项目\\cookie_manager\\cookie_manager (3)\\cookie_manager\\cookie_manager_v5\\cookie_manager';
+const DEFAULT_SELF_BUILT_CANDIDATES = [];
+const DEFAULT_PYTHON_COOKIE_PROJECT = '';
 
 function getDefaultSelfBuiltRoot() {
   return DEFAULT_SELF_BUILT_CANDIDATES.find((candidate) => fs.existsSync(candidate)) || '';
@@ -18,6 +17,17 @@ function normalizeSelfBuiltRoot(value) {
     return normalized;
   }
   return getDefaultSelfBuiltRoot();
+}
+
+function resolveSelfBuiltWorkspaceDir(payload = {}, settings = {}) {
+  return normalizeSelfBuiltRoot(
+    payload.selfBuiltWorkspaceDir
+    || payload.selfBuiltRoot
+    || settings.selfBuiltWorkspaceDir
+    || settings.selfBuiltUserDataRoot
+    || settings.browserScanRoot
+    || ''
+  );
 }
 
 function findChromePath() {
@@ -164,56 +174,32 @@ async function runPythonJsonWithTempArgs(scriptPath, args = [], tempFiles = []) 
 }
 
 async function scanBrowserCards(options = {}) {
-  const scriptPath = path.join(__dirname, 'browser_cards_scan.py');
   const scope = options.scope === 'chrome' || options.scope === 'self_built' ? options.scope : 'all';
   const selfBuiltRoot = normalizeSelfBuiltRoot(options.selfBuiltRoot);
-  const payload = await runPythonJson(scriptPath, ['--scope', scope, '--self-built-root', selfBuiltRoot]);
+  const payload = await scanBrowserCardsInNode({ scope, selfBuiltRoot });
   return { ...payload, selfBuiltRoot };
 }
 
 async function runPythonBridge(command, payload = {}) {
-  const scriptPath = path.join(__dirname, 'python_cookie_bridge.py');
-  const tempFiles = [];
-  const cfgTemp = writeTempJsonArg('cfg', payload.cfg || {});
-  tempFiles.push(cfgTemp);
-  const args = [
-    command,
-    '--project-path',
-    payload.projectPath || DEFAULT_PYTHON_COOKIE_PROJECT,
-    '--cfg-file',
-    cfgTemp.filePath
-  ];
-
-  if (payload.sourceType) {
-    args.push('--source-type', payload.sourceType);
-  }
-  if (payload.sourceId) {
-    args.push('--source-id', payload.sourceId);
-  }
-  if (payload.filterAuth) {
-    args.push('--filter-auth');
-  }
-  if (payload.mergeDomain) {
-    args.push('--merge-domain');
-  }
-  if (payload.domainsJson) {
-    const domainsTemp = writeTempJsonArg('domains', JSON.parse(payload.domainsJson));
-    tempFiles.push(domainsTemp);
-    args.push('--domains-file', domainsTemp.filePath);
-  }
-  if (payload.cardJson) {
-    const cardTemp = writeTempJsonArg('card', JSON.parse(payload.cardJson));
-    tempFiles.push(cardTemp);
-    args.push('--card-file', cardTemp.filePath);
-  }
-
-  return runPythonJsonWithTempArgs(scriptPath, args, tempFiles);
+  const selfBuiltRoot = normalizeSelfBuiltRoot(payload.selfBuiltWorkspaceDir || payload.selfBuiltRoot || '');
+  return runBrowserCommand(command, {
+    ...payload,
+    selfBuiltRoot,
+    cfg: {
+      ...(payload.cfg || {}),
+      self_built_workspace_dir: selfBuiltRoot,
+      self_built_root: selfBuiltRoot,
+      self_built_chromedriver_path: payload?.cfg?.self_built_chromedriver_path || (selfBuiltRoot ? path.join(selfBuiltRoot, 'chromedriver.exe') : ''),
+      self_built_chrome_path: payload?.cfg?.self_built_chrome_path || (selfBuiltRoot ? path.join(selfBuiltRoot, 'chrome.exe') : '')
+    }
+  });
 }
 
 module.exports = {
   DEFAULT_PYTHON_COOKIE_PROJECT,
   getDefaultSelfBuiltRoot,
   normalizeSelfBuiltRoot,
+  resolveSelfBuiltWorkspaceDir,
   openBrowserCard,
   runPythonBridge,
   scanBrowserCards

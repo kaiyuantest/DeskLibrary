@@ -7,6 +7,7 @@ const path = require('path');
 const { pathToFileURL } = require('url');
 const { StorageService } = require('./storage');
 const { getDefaultSelfBuiltRoot, normalizeSelfBuiltRoot, openBrowserCard, runPythonBridge, scanBrowserCards } = require('./browser-import');
+const { listSelfBuiltProfiles } = require('./browser-node-service');
 let uIOhook = null;
 try {
   const hookModule = require('uiohook-napi');
@@ -1011,9 +1012,14 @@ function defaultStatusText() {
 
 function getPythonBridgeConfig(projectPathOverride = '') {
   const settings = getSettings();
+  const selfBuiltWorkspaceDir = settings.selfBuiltWorkspaceDir || settings.selfBuiltUserDataRoot || settings.browserScanRoot || '';
   return {
     projectPath: projectPathOverride || settings.pythonCookieProjectPath,
     cfg: {
+      self_built_workspace_dir: selfBuiltWorkspaceDir,
+      self_built_root: selfBuiltWorkspaceDir,
+      self_built_chrome_path: settings.selfBuiltChromePath || '',
+      self_built_chromedriver_path: settings.selfBuiltChromedriverPath || '',
       bit_api_url: settings.bitApiUrl || 'http://127.0.0.1:54345',
       bit_api_token: settings.bitApiToken || ''
     }
@@ -1022,9 +1028,18 @@ function getPythonBridgeConfig(projectPathOverride = '') {
 
 function getPythonBridgeConfigFromPayload(payload = {}) {
   const settings = getSettings();
+  const selfBuiltWorkspaceDir = settings.selfBuiltWorkspaceDir
+    || settings.selfBuiltUserDataRoot
+    || settings.browserScanRoot
+    || String(payload.selfBuiltWorkspaceDir || payload.selfBuiltRoot || '').trim()
+    || '';
   return {
     projectPath: String(payload.projectPath || '').trim() || settings.pythonCookieProjectPath,
     cfg: {
+      self_built_workspace_dir: selfBuiltWorkspaceDir,
+      self_built_root: selfBuiltWorkspaceDir,
+      self_built_chrome_path: String(payload.selfBuiltChromePath || '').trim() || settings.selfBuiltChromePath || '',
+      self_built_chromedriver_path: String(payload.selfBuiltChromedriverPath || '').trim() || settings.selfBuiltChromedriverPath || '',
       bit_api_url: String(payload.bitApiUrl || '').trim() || settings.bitApiUrl || 'http://127.0.0.1:54345',
       bit_api_token: String(payload.bitApiToken || '').trim() || settings.bitApiToken || ''
     }
@@ -1742,9 +1757,20 @@ function setupIpc() {
 
   ipcMain.handle('save-settings', async (_, settings) => {
     try {
+      const selfBuiltWorkspaceDir = String(
+        settings?.selfBuiltWorkspaceDir
+        || settings?.selfBuiltUserDataRoot
+        || settings?.browserScanRoot
+        || ''
+      ).trim();
       const saved = storage.saveSettings({
         ...getSettings(),
-        ...settings
+        ...settings,
+        selfBuiltWorkspaceDir,
+        browserScanRoot: selfBuiltWorkspaceDir,
+        selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
+        selfBuiltChromePath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chrome.exe') : '',
+        selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chromedriver.exe') : ''
       });
       applySystemSettings(saved);
       sendSnapshot('设置已保存');
@@ -1852,11 +1878,23 @@ function setupIpc() {
   ipcMain.handle('scan-browser-cards', async (_, payload = {}) => {
     try {
       const scope = payload.scope === 'chrome' || payload.scope === 'self_built' ? payload.scope : 'all';
-      const selfBuiltRoot = normalizeSelfBuiltRoot(payload.selfBuiltRoot || getSettings().browserScanRoot || getDefaultSelfBuiltRoot());
-      if ((getSettings().browserScanRoot || '') !== selfBuiltRoot) {
+      const settings = getSettings();
+      const selfBuiltRoot = normalizeSelfBuiltRoot(
+        settings.selfBuiltWorkspaceDir
+        || settings.selfBuiltUserDataRoot
+        || settings.browserScanRoot
+        || payload.selfBuiltWorkspaceDir
+        || payload.selfBuiltRoot
+        || getDefaultSelfBuiltRoot()
+      );
+      if ((settings.selfBuiltWorkspaceDir || settings.browserScanRoot || '') !== selfBuiltRoot) {
         storage.saveSettings({
-          ...getSettings(),
-          browserScanRoot: selfBuiltRoot
+          ...settings,
+          selfBuiltWorkspaceDir: selfBuiltRoot,
+          browserScanRoot: selfBuiltRoot,
+          selfBuiltUserDataRoot: selfBuiltRoot,
+          selfBuiltChromePath: selfBuiltRoot ? path.join(selfBuiltRoot, 'chrome.exe') : '',
+          selfBuiltChromedriverPath: selfBuiltRoot ? path.join(selfBuiltRoot, 'chromedriver.exe') : ''
         });
       }
 
@@ -1881,16 +1919,27 @@ function setupIpc() {
 
   ipcMain.handle('get-browser-import-sources', async (_, payload = {}) => {
     try {
-      const projectPath = String(payload.projectPath || '').trim();
+      const settings = getSettings();
+      const selfBuiltWorkspaceDir = String(
+        settings.selfBuiltWorkspaceDir
+        || settings.selfBuiltUserDataRoot
+        || settings.browserScanRoot
+        || payload.selfBuiltWorkspaceDir
+        || payload.selfBuiltRoot
+        || ''
+      ).trim();
       const bitApiUrl = String(payload.bitApiUrl || '').trim();
       const bitApiToken = String(payload.bitApiToken || '').trim();
-      const settings = getSettings();
-      if ((projectPath && projectPath !== settings.pythonCookieProjectPath)
+      if ((selfBuiltWorkspaceDir && selfBuiltWorkspaceDir !== (settings.selfBuiltWorkspaceDir || settings.selfBuiltUserDataRoot || settings.browserScanRoot || ''))
         || (bitApiUrl && bitApiUrl !== settings.bitApiUrl)
         || (bitApiToken !== '' && bitApiToken !== settings.bitApiToken)) {
         storage.saveSettings({
           ...settings,
-          pythonCookieProjectPath: projectPath || settings.pythonCookieProjectPath,
+          selfBuiltWorkspaceDir: selfBuiltWorkspaceDir || settings.selfBuiltWorkspaceDir || settings.selfBuiltUserDataRoot || settings.browserScanRoot || '',
+          browserScanRoot: selfBuiltWorkspaceDir || settings.browserScanRoot || '',
+          selfBuiltUserDataRoot: selfBuiltWorkspaceDir || settings.selfBuiltUserDataRoot || '',
+          selfBuiltChromePath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chrome.exe') : (settings.selfBuiltChromePath || ''),
+          selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chromedriver.exe') : (settings.selfBuiltChromedriverPath || ''),
           bitApiUrl: bitApiUrl || settings.bitApiUrl,
           bitApiToken: bitApiToken !== '' ? bitApiToken : settings.bitApiToken
         });
@@ -1898,7 +1947,8 @@ function setupIpc() {
       const result = await runPythonBridge('list-offline-sources', getPythonBridgeConfigFromPayload(payload));
       return {
         ok: true,
-        results: result.results || {}
+        results: result.results || {},
+        selfBuiltRoot: result?.results?.self_built_root || selfBuiltWorkspaceDir || settings.selfBuiltWorkspaceDir || settings.browserScanRoot || ''
       };
     } catch (error) {
       return {
@@ -1908,18 +1958,91 @@ function setupIpc() {
     }
   });
 
+  ipcMain.handle('get-self-built-import-sources', async (_, payload = {}) => {
+    try {
+      const settings = getSettings();
+      const selfBuiltWorkspaceDir = normalizeSelfBuiltRoot(
+        settings.selfBuiltWorkspaceDir
+        || settings.selfBuiltUserDataRoot
+        || settings.browserScanRoot
+        || payload.selfBuiltWorkspaceDir
+        || payload.selfBuiltRoot
+        || ''
+      );
+      const results = listSelfBuiltProfiles(selfBuiltWorkspaceDir);
+      return {
+        ok: true,
+        results,
+        selfBuiltRoot: selfBuiltWorkspaceDir
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '获取自建浏览器来源失败'
+      };
+    }
+  });
+
+  ipcMain.handle('open-self-built-browser', async (_, payload = {}) => {
+    try {
+      const settings = getSettings();
+      const selfBuiltWorkspaceDir = String(
+        settings.selfBuiltWorkspaceDir
+        || settings.selfBuiltUserDataRoot
+        || settings.browserScanRoot
+        || payload.selfBuiltWorkspaceDir
+        || payload.selfBuiltRoot
+        || ''
+      ).trim();
+      if (selfBuiltWorkspaceDir && selfBuiltWorkspaceDir !== (settings.selfBuiltWorkspaceDir || settings.selfBuiltUserDataRoot || settings.browserScanRoot || '')) {
+        storage.saveSettings({
+          ...settings,
+          selfBuiltWorkspaceDir,
+          browserScanRoot: selfBuiltWorkspaceDir,
+          selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
+          selfBuiltChromePath: path.join(selfBuiltWorkspaceDir, 'chrome.exe'),
+          selfBuiltChromedriverPath: path.join(selfBuiltWorkspaceDir, 'chromedriver.exe')
+        });
+      }
+      const result = await runPythonBridge('open-self-built-browser', {
+        ...getPythonBridgeConfigFromPayload(payload),
+        port: payload.port || '',
+        url: payload.url || ''
+      });
+      return result && typeof result === 'object'
+        ? result
+        : { ok: false, message: '打开自建浏览器失败' };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '打开自建浏览器失败'
+      };
+    }
+  });
+
   ipcMain.handle('load-browser-import-groups', async (_, payload = {}) => {
     try {
-      const projectPath = String(payload.projectPath || '').trim();
+      const settings = getSettings();
+      const selfBuiltWorkspaceDir = String(
+        settings.selfBuiltWorkspaceDir
+        || settings.selfBuiltUserDataRoot
+        || settings.browserScanRoot
+        || payload.selfBuiltWorkspaceDir
+        || payload.selfBuiltRoot
+        || ''
+      ).trim();
       const bitApiUrl = String(payload.bitApiUrl || '').trim();
       const bitApiToken = String(payload.bitApiToken || '').trim();
-      const settings = getSettings();
-      if ((projectPath && projectPath !== settings.pythonCookieProjectPath)
+      if ((selfBuiltWorkspaceDir && selfBuiltWorkspaceDir !== (settings.selfBuiltWorkspaceDir || settings.selfBuiltUserDataRoot || settings.browserScanRoot || ''))
         || (bitApiUrl && bitApiUrl !== settings.bitApiUrl)
         || (bitApiToken !== '' && bitApiToken !== settings.bitApiToken)) {
         storage.saveSettings({
           ...settings,
-          pythonCookieProjectPath: projectPath || settings.pythonCookieProjectPath,
+          selfBuiltWorkspaceDir: selfBuiltWorkspaceDir || settings.selfBuiltWorkspaceDir || settings.selfBuiltUserDataRoot || settings.browserScanRoot || '',
+          browserScanRoot: selfBuiltWorkspaceDir || settings.browserScanRoot || '',
+          selfBuiltUserDataRoot: selfBuiltWorkspaceDir || settings.selfBuiltUserDataRoot || '',
+          selfBuiltChromePath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chrome.exe') : (settings.selfBuiltChromePath || ''),
+          selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chromedriver.exe') : (settings.selfBuiltChromedriverPath || ''),
           bitApiUrl: bitApiUrl || settings.bitApiUrl,
           bitApiToken: bitApiToken !== '' ? bitApiToken : settings.bitApiToken
         });
@@ -1989,6 +2112,37 @@ function setupIpc() {
     return { ok: !!result };
   });
 
+  ipcMain.handle('refresh-browser-card-cookies', async (_, id) => {
+    try {
+      const card = storage.getAllBrowserCards().find((item) => item.id === id);
+      if (!card) {
+        return { ok: false, message: '浏览器卡片不存在' };
+      }
+      const result = await runPythonBridge('refresh-card-cookies', {
+        ...getPythonBridgeConfig(),
+        cardJson: JSON.stringify(card)
+      });
+      if (!result.ok) {
+        return result;
+      }
+      const updated = storage.updateBrowserCard(id, {
+        cookies: Array.isArray(result.cookies) ? result.cookies : [],
+        cookieNames: Array.isArray(result.cookieNames) ? result.cookieNames : [],
+        cookieCount: Number(result.cookieCount || 0)
+      });
+      if (!updated) {
+        return { ok: false, message: '卡片更新失败' };
+      }
+      sendSnapshot(result.message || 'Cookie 已更新');
+      return { ok: true, message: result.message || 'Cookie 已更新' };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '更新 Cookie 失败'
+      };
+    }
+  });
+
   ipcMain.handle('open-browser-card', async (_, id) => {
     try {
       const card = storage.getAllBrowserCards().find((item) => item.id === id);
@@ -2043,6 +2197,46 @@ function setupIpc() {
         ok: false,
         message: error && error.message ? error.message : 'Cookie 转移失败'
       };
+    }
+  });
+
+  ipcMain.handle('get-browser-inject-targets', async () => {
+    try {
+      const result = await runPythonBridge('list-inject-targets', getPythonBridgeConfig());
+      return { ok: true, results: Array.isArray(result.results) ? result.results : [] };
+    } catch (error) {
+      return { ok: false, message: error && error.message ? error.message : '获取目标浏览器失败' };
+    }
+  });
+
+  ipcMain.handle('execute-browser-card-inject', async (_, payload = {}) => {
+    try {
+      const id = String(payload.id || '');
+      const method = payload.method === 'db_write' ? 'db_write' : 'inject';
+      const target = payload.target && typeof payload.target === 'object' ? payload.target : null;
+      const card = storage.getAllBrowserCards().find((item) => item.id === id);
+      if (!card) {
+        return { ok: false, message: '浏览器卡片不存在' };
+      }
+      if (!target) {
+        return { ok: false, message: '未选择目标浏览器' };
+      }
+      const result = await runPythonBridge('inject-to-target', {
+        ...getPythonBridgeConfig(),
+        method,
+        cardJson: JSON.stringify(card),
+        targetJson: JSON.stringify(target)
+      });
+      if (result.ok) {
+        storage.updateBrowserCard(id, {
+          last_used_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+          last_used_method: method
+        });
+        sendSnapshot(result.message || 'Cookie 转移完成');
+      }
+      return result;
+    } catch (error) {
+      return { ok: false, message: error && error.message ? error.message : 'Cookie 转移失败' };
     }
   });
 

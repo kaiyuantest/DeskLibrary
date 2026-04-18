@@ -209,9 +209,6 @@
                 <div class="browser-import-toolbar">
                   <div class="browser-action-row">
                     <button id="openBrowserImportModalBtn" class="save-pill" type="button">离线导入</button>
-                    <button id="scanAllBrowsersBtn" class="text-action" type="button">刷新浏览器</button>
-                    <button id="scanChromeBtn" class="text-action" type="button">系统 Chrome</button>
-                    <button id="scanSelfBuiltBtn" class="text-action" type="button">自建浏览器</button>
                   </div>
                 </div>
 
@@ -265,6 +262,11 @@
                 <div class="settings-key-row">
                   <span>复制后按键</span>
                   <input id="postCopyKey" type="text" placeholder="Shift / Ctrl / Alt" />
+                </div>
+
+                <div class="settings-key-row">
+                  <span>自建浏览器工作目录</span>
+                  <input id="selfBuiltWorkspaceDirInput" type="text" placeholder="例如 E:\\日常笔记\\归档笔记\\test" />
                 </div>
 
                 <p class="settings-hint">开机启动在保存后生效，通常需要下次登录系统时验证。</p>
@@ -401,6 +403,58 @@
       </section>
     </div>
 
+    <div id="browserInjectModal" class="modal hidden">
+      <div id="browserInjectModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card browser-inject-modal-card">
+        <div class="modal-head">
+          <div>
+            <div class="modal-title">Cookie 转移</div>
+            <div id="browserInjectStatus" class="modal-subline">请选择目标浏览器</div>
+          </div>
+          <button id="closeBrowserInjectModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+
+        <div class="browser-inject-actions">
+          <button id="browserInjectRefreshBtn" class="text-action" type="button">刷新目标浏览器</button>
+        </div>
+
+        <div class="modal-body browser-inject-modal-body">
+          <section class="browser-inject-panel">
+            <div class="section-head compact">
+              <span>目标浏览器</span>
+              <span id="browserInjectTargetCount" class="count-chip">0</span>
+            </div>
+            <section id="browserInjectTargetsList" class="browser-inject-targets-list"></section>
+          </section>
+
+          <section class="browser-inject-panel">
+            <div class="section-head compact">
+              <span>转移方式</span>
+            </div>
+            <label class="browser-inject-method-row">
+              <input id="browserInjectMethodInject" name="browserInjectMethod" type="radio" value="inject" checked />
+              <div>
+                <strong>CDP 注入</strong>
+                <span>目标浏览器正在运行时立即注入并导航，适合自建浏览器和比特浏览器。</span>
+              </div>
+            </label>
+            <label class="browser-inject-method-row">
+              <input id="browserInjectMethodDbWrite" name="browserInjectMethod" type="radio" value="db_write" />
+              <div>
+                <strong>数据库写入</strong>
+                <span>直写目标 Cookie 数据库，通常需要目标浏览器关闭后再使用。</span>
+              </div>
+            </label>
+            <div id="browserInjectHint" class="minor-text">系统 Chrome 目标会固定走数据库写入。</div>
+          </section>
+        </div>
+
+        <div class="modal-actions">
+          <button id="browserInjectConfirmBtn" class="save-pill compact" type="button">开始转移</button>
+        </div>
+      </section>
+    </div>
+
     <div id="browserImportModal" class="modal hidden">
       <div id="browserImportModalOverlay" class="modal-overlay"></div>
       <section class="modal-card browser-import-modal-card">
@@ -421,6 +475,15 @@
         <div class="modal-body">
           <div class="browser-import-layout">
             <section class="browser-import-config-panel">
+              <div id="browserImportSelfBuiltConfigBox" class="browser-import-config-grid hidden">
+                <label class="control-card asset-search-card browser-import-config-card">
+                  <span class="control-label">自定义端口</span>
+                  <input id="browserImportSelfBuiltPortInput" class="search-input" type="number" min="1000" max="65535" step="1" placeholder="例如 9222" />
+                </label>
+                <div class="browser-import-actions-row">
+                  <button id="browserImportOpenSelfBuiltBtn" class="text-action" type="button">打开新窗口</button>
+                </div>
+              </div>
               <div id="browserImportBitConfigBox" class="browser-import-config-grid">
                 <label class="control-card asset-search-card browser-import-config-card">
                   <span class="control-label">比特 API 地址</span>

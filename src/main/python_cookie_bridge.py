@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 
 
-DEFAULT_PROJECT_PATH = r"E:\project\多账号管理项目\cookie_manager\cookie_manager (3)\cookie_manager\cookie_manager_v5\cookie_manager"
+DEFAULT_PROJECT_PATH = ""
 
 
 def setup_external_project(project_path: str):
@@ -313,6 +313,19 @@ def scan_all_browsers(project_path: str, cfg: dict):
     setup_external_project(project_path)
     import browser
     return browser.scan_all_browsers(cfg or {})
+
+
+def list_inject_targets(project_path: str, cfg: dict):
+    targets = scan_all_browsers(project_path, cfg) or []
+    results = []
+    for item in targets:
+        btype = item.get("type", "")
+        if btype == "chrome_profile":
+            results.append(item)
+            continue
+        if item.get("is_open") and item.get("port"):
+            results.append(item)
+    return results
 
 
 def list_offline_sources(project_path: str, cfg: dict):
@@ -663,6 +676,60 @@ def inject_open(project_path: str, cfg: dict, card: dict):
     return {"ok": False, "message": f"未知来源类型: {src_type}"}
 
 
+def inject_to_target(project_path: str, cfg: dict, card: dict, target: dict, method: str = "inject"):
+    browser = load_browser_module(project_path)
+    url = card.get("open_url") or card.get("url") or ""
+    cookies = card.get("cookies", [])
+    btype = target.get("type", "")
+
+    if btype == "chrome_profile":
+        profile_name = target.get("profile_name", "")
+        user_data_dir = target.get("user_data_dir", "")
+        cookie_file = get_cookie_path(Path(user_data_dir) / profile_name) if user_data_dir and profile_name else None
+        if not cookie_file:
+            return {"ok": False, "message": f"找不到 Profile {profile_name} 的 Cookie 数据库，请确认目标 Chrome 已关闭"}
+        count, detail = browser.db_write_cookies(str(cookie_file), cookies, user_data_dir)
+        if not count:
+            return {"ok": False, "message": detail or "写入系统 Chrome Cookie 数据库失败"}
+        return {"ok": True, "message": f"已向系统 Chrome Profile 写入 {count} 条 Cookie"}
+
+    port = int(target.get("port", 0) or 0)
+    user_data_dir = target.get("user_data_dir", "")
+
+    if method == "db_write":
+        db_path, udd = browser.find_cookie_db_for_port(port) if port else ("", "")
+        if not db_path and user_data_dir:
+            db_path, udd = browser.find_cookie_db_for_udd(user_data_dir)
+        if not db_path:
+            return {"ok": False, "message": "找不到目标浏览器 Cookie 数据库，请确认目标浏览器已关闭或可读取用户目录"}
+        count, detail = browser.db_write_cookies(db_path, cookies, udd)
+        if not count:
+            return {"ok": False, "message": detail or "数据库写入失败"}
+        return {"ok": True, "message": f"已写入 {count} 条 Cookie，重启目标浏览器后生效"}
+
+    if btype == "self_built" and not port:
+        launch_port = int(target.get("port", 0) or 0)
+        err = browser.launch_self_built_browser(launch_port, user_data_dir, "")
+        if err:
+            return {"ok": False, "message": err}
+        port = launch_port
+
+    if btype == "bitbrowser" and not port:
+        api_url = cfg.get("bit_api_url", "http://127.0.0.1:54345")
+        token = cfg.get("bit_api_token", "")
+        browser_id = target.get("id", "") or target.get("browser_id", "")
+        result = browser.bit_open_browser(api_url, browser_id, token)
+        if not result:
+            return {"ok": False, "message": "打开比特浏览器环境失败"}
+        port = int(result.get("port", 0))
+
+    if not port:
+        return {"ok": False, "message": "目标浏览器未运行，无法执行注入"}
+
+    ok, detail = browser.inject_cookies(port, url, cookies)
+    return {"ok": ok, "message": detail if ok else f"注入失败: {detail}"}
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command")
@@ -677,12 +744,17 @@ def main():
     parser.add_argument("--domains-file", default="")
     parser.add_argument("--card-json", default="{}")
     parser.add_argument("--card-file", default="")
+    parser.add_argument("--target-json", default="{}")
+    parser.add_argument("--target-file", default="")
+    parser.add_argument("--method", default="inject")
     args = parser.parse_args()
 
     cfg = parse_json_input(args.cfg_json, args.cfg_file, {})
 
     if args.command == "scan-all-browsers":
         payload = {"ok": True, "results": scan_all_browsers(args.project_path, cfg)}
+    elif args.command == "list-inject-targets":
+        payload = {"ok": True, "results": list_inject_targets(args.project_path, cfg)}
     elif args.command == "list-offline-sources":
         payload = {"ok": True, "results": list_offline_sources(args.project_path, cfg)}
     elif args.command == "load-offline-groups":
@@ -712,6 +784,14 @@ def main():
         payload = default_open(args.project_path, cfg, parse_json_input(args.card_json, args.card_file, {}))
     elif args.command == "inject-open":
         payload = inject_open(args.project_path, cfg, parse_json_input(args.card_json, args.card_file, {}))
+    elif args.command == "inject-to-target":
+        payload = inject_to_target(
+            args.project_path,
+            cfg,
+            parse_json_input(args.card_json, args.card_file, {}),
+            parse_json_input(args.target_json, args.target_file, {}),
+            args.method or "inject",
+        )
     else:
         raise ValueError(f"未知命令: {args.command}")
 

@@ -50,7 +50,11 @@ class StorageService {
       floatingOffsetX: null,
       floatingDockSide: 'right',
       floatingOffsetY: null,
+      selfBuiltWorkspaceDir: '',
       browserScanRoot: '',
+      selfBuiltUserDataRoot: '',
+      selfBuiltChromePath: '',
+      selfBuiltChromedriverPath: '',
       pythonCookieProjectPath: DEFAULT_PYTHON_COOKIE_PROJECT,
       bitApiUrl: 'http://127.0.0.1:54345',
       bitApiToken: ''
@@ -178,6 +182,16 @@ class StorageService {
   }
 
   getSettings() {
+    const raw = this.readJson(this.settingsFile, {});
+    const selfBuiltWorkspaceDir = String(
+      raw.selfBuiltWorkspaceDir
+      || raw.selfBuiltUserDataRoot
+      || raw.browserScanRoot
+      || ''
+    ).trim();
+    const derivedChromedriverPath = selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chromedriver.exe') : '';
+    const derivedChromePath = selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chrome.exe') : '';
+
     return {
       autoJudgmentEnabled: true,
       altQEnabled: true,
@@ -194,11 +208,20 @@ class StorageService {
       floatingOffsetX: null,
       floatingDockSide: 'right',
       floatingOffsetY: null,
+      selfBuiltWorkspaceDir,
       browserScanRoot: '',
+      selfBuiltUserDataRoot: '',
+      selfBuiltChromePath: '',
+      selfBuiltChromedriverPath: '',
       pythonCookieProjectPath: DEFAULT_PYTHON_COOKIE_PROJECT,
       bitApiUrl: 'http://127.0.0.1:54345',
       bitApiToken: '',
-      ...this.readJson(this.settingsFile, {})
+      ...raw,
+      selfBuiltWorkspaceDir,
+      browserScanRoot: selfBuiltWorkspaceDir,
+      selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
+      selfBuiltChromePath: String(raw.selfBuiltChromePath || '').trim() || derivedChromePath,
+      selfBuiltChromedriverPath: String(raw.selfBuiltChromedriverPath || '').trim() || derivedChromedriverPath
     };
   }
 

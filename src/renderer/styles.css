@@ -997,6 +997,10 @@ input[type="checkbox"]:checked::before {
   gap: 10px;
 }
 
+.browser-import-config-grid.hidden {
+  display: none;
+}
+
 .browser-import-config-card {
   padding: 10px 12px 12px;
 }
@@ -1172,6 +1176,11 @@ input[type="checkbox"]:checked::before {
 .browser-import-source-panel .search-input {
   min-height: 38px;
   padding: 8px 12px;
+}
+
+#browserImportSelfBuiltConfigBox {
+  grid-template-columns: minmax(220px, 300px) auto;
+  align-items: end;
 }
 
 .browser-import-options .setting-row {
@@ -1466,6 +1475,85 @@ input[type="checkbox"]:checked::before {
 .browser-card-form-block textarea,
 .browser-card-form-block input {
   border-radius: 14px;
+}
+
+.browser-inject-modal-card {
+  width: min(720px, calc(100vw - 28px));
+  max-height: min(84vh, 760px);
+}
+
+.browser-inject-actions {
+  margin-top: 10px;
+}
+
+.browser-inject-modal-body {
+  grid-template-columns: minmax(320px, 1fr) minmax(240px, 320px);
+  align-items: start;
+}
+
+.browser-inject-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+}
+
+.browser-inject-targets-list {
+  display: grid;
+  gap: 8px;
+  max-height: 420px;
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.browser-inject-target-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid rgba(104, 129, 168, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.browser-inject-target-main {
+  display: grid;
+  gap: 4px;
+}
+
+.browser-inject-target-main strong {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.browser-inject-target-main span {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.browser-inject-method-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 10px;
+  align-items: start;
+  padding: 10px 12px;
+  border: 1px solid rgba(104, 129, 168, 0.18);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.94);
+}
+
+.browser-inject-method-row strong {
+  display: block;
+  font-size: 12px;
+  color: var(--text);
+}
+
+.browser-inject-method-row span {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .text-action.danger {

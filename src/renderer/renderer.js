@@ -37,6 +37,12 @@ const state = {
   browserImportSourceError: '',
   browserImportFilterAuth: false,
   browserImportMergeDomain: false,
+  browserInjectModalOpen: false,
+  browserInjectCardId: null,
+  browserInjectTargets: [],
+  browserInjectSelectedTargetId: '',
+  browserInjectMethod: 'inject',
+  browserInjectStatus: '请选择目标浏览器',
   statusText: '后台监听中',
   modalOpen: false,
   browserCardModalOpen: false,
@@ -96,9 +102,6 @@ const els = {
   browserScanSummary: document.getElementById('browserScanSummary'),
   browserScanResults: document.getElementById('browserScanResults'),
   openBrowserImportModalBtn: document.getElementById('openBrowserImportModalBtn'),
-  scanAllBrowsersBtn: document.getElementById('scanAllBrowsersBtn'),
-  scanChromeBtn: document.getElementById('scanChromeBtn'),
-  scanSelfBuiltBtn: document.getElementById('scanSelfBuiltBtn'),
   importSelectedBrowsersBtn: document.getElementById('importSelectedBrowsersBtn'),
   browserCardSearchInput: document.getElementById('browserCardSearchInput'),
   browserCardSelectedCount: document.getElementById('browserCardSelectedCount'),
@@ -134,6 +137,7 @@ const els = {
   floatingIconEnabled: document.getElementById('floatingIconEnabled'),
   dockToEdgeEnabled: document.getElementById('dockToEdgeEnabled'),
   postCopyKey: document.getElementById('postCopyKey'),
+  selfBuiltWorkspaceDirInput: document.getElementById('selfBuiltWorkspaceDirInput'),
   saveSettingsBtn: document.getElementById('saveSettingsBtn'),
   recordModal: document.getElementById('recordModal'),
   modalOverlay: document.getElementById('modalOverlay'),
@@ -174,6 +178,17 @@ const els = {
   browserCardSaveBtn: document.getElementById('browserCardSaveBtn'),
   browserCardDeleteBtn: document.getElementById('browserCardDeleteBtn')
   ,
+  browserInjectModal: document.getElementById('browserInjectModal'),
+  browserInjectModalOverlay: document.getElementById('browserInjectModalOverlay'),
+  closeBrowserInjectModalBtn: document.getElementById('closeBrowserInjectModalBtn'),
+  browserInjectStatus: document.getElementById('browserInjectStatus'),
+  browserInjectRefreshBtn: document.getElementById('browserInjectRefreshBtn'),
+  browserInjectTargetCount: document.getElementById('browserInjectTargetCount'),
+  browserInjectTargetsList: document.getElementById('browserInjectTargetsList'),
+  browserInjectMethodInject: document.getElementById('browserInjectMethodInject'),
+  browserInjectMethodDbWrite: document.getElementById('browserInjectMethodDbWrite'),
+  browserInjectHint: document.getElementById('browserInjectHint'),
+  browserInjectConfirmBtn: document.getElementById('browserInjectConfirmBtn'),
   browserImportModal: document.getElementById('browserImportModal'),
   browserImportModalOverlay: document.getElementById('browserImportModalOverlay'),
   closeBrowserImportModalBtn: document.getElementById('closeBrowserImportModalBtn'),
@@ -183,6 +198,9 @@ const els = {
   browserImportBitTabBtn: document.getElementById('browserImportBitTabBtn'),
   browserImportBitApiUrlInput: document.getElementById('browserImportBitApiUrlInput'),
   browserImportBitApiTokenInput: document.getElementById('browserImportBitApiTokenInput'),
+  browserImportSelfBuiltConfigBox: document.getElementById('browserImportSelfBuiltConfigBox'),
+  browserImportSelfBuiltPortInput: document.getElementById('browserImportSelfBuiltPortInput'),
+  browserImportOpenSelfBuiltBtn: document.getElementById('browserImportOpenSelfBuiltBtn'),
   browserImportBitConfigBox: document.getElementById('browserImportBitConfigBox'),
   browserImportSaveBitConfigBtn: document.getElementById('browserImportSaveBitConfigBtn'),
   browserImportScanSourcesBtn: document.getElementById('browserImportScanSourcesBtn'),
@@ -381,6 +399,7 @@ function render() {
   renderModal();
   renderAssetModal();
   renderBrowserCardModal();
+  renderBrowserInjectModal();
   renderBrowserImportModal();
   renderSettings();
 }
@@ -413,6 +432,22 @@ function sourceTypeDisplay(type) {
   if (type === 'self_built') return '自建浏览器';
   if (type === 'bitbrowser' || type === 'bitbrowser_api') return '比特浏览器';
   return '未知来源';
+}
+
+function browserInjectTargetId(target) {
+  const type = target.type || 'unknown';
+  return `${type}:${target.id || target.browser_id || target.profile_name || target.user_data_dir || target.name || ''}`;
+}
+
+function browserInjectTargetLabel(target) {
+  if ((target.type || '') === 'chrome_profile') {
+    return target.display_name || target.profile_name || target.name || '系统 Chrome';
+  }
+  return target.name || target.display_name || target.id || '未知目标';
+}
+
+function selectedBrowserInjectTarget() {
+  return state.browserInjectTargets.find((item) => browserInjectTargetId(item) === state.browserInjectSelectedTargetId) || null;
 }
 
 function browserSourceLabel(card) {
@@ -633,6 +668,7 @@ function buildBrowserCard(card) {
         </label>
         <div class="asset-card-actions browser-card-tools">
           <button class="card-copy-btn" data-browser-card-test="${card.id}" title="测试网站连通性">测</button>
+          <button class="card-copy-btn" data-browser-card-refresh="${card.id}" title="更新最新 Cookie">更</button>
           <button class="card-copy-btn" data-browser-card-edit-url="${card.id}" title="编辑地址、备注、账号密码">✎</button>
         </div>
       </div>
@@ -905,14 +941,20 @@ function renderBrowserCardsList() {
         }
         applySnapshot(await window.click2save.getInitialData());
       });
-      item.querySelector('[data-browser-card-inject]')?.addEventListener('click', async (event) => {
+      item.querySelector('[data-browser-card-refresh]')?.addEventListener('click', async (event) => {
         event.stopPropagation();
-        const result = await window.click2save.injectBrowserCard(card.id);
+        const result = await window.click2save.refreshBrowserCardCookies(card.id);
         if (result && result.ok === false) {
-          alert(result.message || 'Cookie 转移失败');
+          alert(result.message || '更新 Cookie 失败');
           return;
         }
         applySnapshot(await window.click2save.getInitialData());
+      });
+      item.querySelector('[data-browser-card-inject]')?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        state.selectedBrowserCardId = card.id;
+        openBrowserInjectModal(card.id);
+        await loadBrowserInjectTargets();
       });
       item.querySelector('[data-browser-card-edit-url]')?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1020,6 +1062,51 @@ function renderBrowserCardModal() {
   `;
 }
 
+function renderBrowserInjectModal() {
+  if (!els.browserInjectModal) return;
+  const targets = state.browserInjectTargets || [];
+  const selectedTarget = selectedBrowserInjectTarget();
+  els.browserInjectStatus.textContent = state.browserInjectStatus || '请选择目标浏览器';
+  els.browserInjectTargetCount.textContent = String(targets.length);
+  els.browserInjectTargetsList.innerHTML = '';
+
+  if (!targets.length) {
+    const empty = document.createElement('div');
+    empty.className = 'quick-empty';
+    empty.textContent = '还没有可用目标。系统 Chrome Profile 会始终显示；自建浏览器和比特浏览器需要先处于运行状态。';
+    els.browserInjectTargetsList.appendChild(empty);
+  } else {
+    targets.forEach((target) => {
+      const targetId = browserInjectTargetId(target);
+      const row = document.createElement('label');
+      row.className = 'browser-inject-target-row';
+      row.innerHTML = `
+        <input type="radio" name="browserInjectTarget" value="${escapeHtml(targetId)}"${targetId === state.browserInjectSelectedTargetId ? ' checked' : ''} />
+        <div class="browser-inject-target-main">
+          <strong>${escapeHtml(browserInjectTargetLabel(target))}</strong>
+          <span>${escapeHtml(sourceTypeDisplay(target.type || ''))}${target.port ? ` · 端口 ${escapeHtml(target.port)}` : ''}${target.is_open ? ' · 运行中' : ''}</span>
+        </div>
+      `;
+      row.querySelector('input')?.addEventListener('change', () => {
+        state.browserInjectSelectedTargetId = targetId;
+        renderBrowserInjectModal();
+      });
+      els.browserInjectTargetsList.appendChild(row);
+    });
+  }
+
+  const forceDbWrite = selectedTarget && selectedTarget.type === 'chrome_profile';
+  els.browserInjectMethodInject.checked = !forceDbWrite && state.browserInjectMethod !== 'db_write';
+  els.browserInjectMethodDbWrite.checked = forceDbWrite || state.browserInjectMethod === 'db_write';
+  els.browserInjectMethodInject.disabled = !!forceDbWrite;
+  if (forceDbWrite) {
+    state.browserInjectMethod = 'db_write';
+  }
+  els.browserInjectHint.textContent = forceDbWrite
+    ? '系统 Chrome Profile 目标固定走数据库写入，请先关闭对应目标 Profile 窗口。'
+    : '自建浏览器 / 比特浏览器运行中时建议使用 CDP 注入；数据库写入通常需要目标浏览器关闭。';
+}
+
 function currentBrowserImportSources() {
   if (state.browserImportTab === 'self_built') return state.browserImportSources.self_built || [];
   if (state.browserImportTab === 'bitbrowser_api') return state.browserImportSources.bitbrowser || [];
@@ -1043,13 +1130,18 @@ function renderBrowserImportModal() {
   els.browserImportBitTabBtn?.classList.toggle('active', state.browserImportTab === 'bitbrowser_api');
   els.browserImportFilterAuth.checked = !!state.browserImportFilterAuth;
   els.browserImportMergeDomain.checked = !!state.browserImportMergeDomain;
+  els.browserImportSelfBuiltConfigBox?.classList.toggle('hidden', state.browserImportTab !== 'self_built');
   els.browserImportBitConfigBox?.classList.toggle('hidden', state.browserImportTab !== 'bitbrowser_api');
   els.browserImportSaveBitConfigBtn?.classList.toggle('hidden', state.browserImportTab !== 'bitbrowser_api');
+  els.browserImportOpenSelfBuiltBtn?.classList.toggle('hidden', state.browserImportTab !== 'self_built');
   if (els.browserImportBitApiUrlInput) {
     els.browserImportBitApiUrlInput.value = state.settings.bitApiUrl || 'http://127.0.0.1:54345';
   }
   if (els.browserImportBitApiTokenInput) {
     els.browserImportBitApiTokenInput.value = state.settings.bitApiToken || '';
+  }
+  if (els.browserImportSelfBuiltPortInput && !els.browserImportSelfBuiltPortInput.value) {
+    els.browserImportSelfBuiltPortInput.value = '9222';
   }
   els.browserImportStatus.textContent = state.browserScanSummary || '请选择来源并加载 Cookie';
 
@@ -1058,10 +1150,6 @@ function renderBrowserImportModal() {
     els.browserImportSourceCount.textContent = `${sources.length}`;
   }
   state.browserImportSourceIds = state.browserImportSourceIds.filter((id) => sources.some((item) => item.id === id));
-  if (!state.browserImportSourceIds.length && sources.length === 1) {
-    state.browserImportSourceIds = [sources[0].id];
-    state.browserImportSourceSelection[sources[0].id] = true;
-  }
 
   els.browserImportSourcesList.innerHTML = '';
   if (!sources.length) {
@@ -1225,6 +1313,12 @@ function renderSettings() {
   els.floatingIconEnabled.checked = !!state.settings.floatingIconEnabled;
   els.dockToEdgeEnabled.checked = state.settings.dockToEdgeEnabled !== false;
   els.postCopyKey.value = state.settings.postCopyKey || 'Shift';
+  if (els.selfBuiltWorkspaceDirInput) {
+    els.selfBuiltWorkspaceDirInput.value = state.settings.selfBuiltWorkspaceDir
+      || state.settings.selfBuiltUserDataRoot
+      || state.settings.browserScanRoot
+      || '';
+  }
 }
 
 function ensureValidSelection() {
@@ -1295,6 +1389,20 @@ function closeBrowserCardModal() {
   els.browserCardModal.classList.add('hidden');
 }
 
+function openBrowserInjectModal(cardId) {
+  state.browserInjectCardId = cardId || state.selectedBrowserCardId;
+  state.browserInjectModalOpen = true;
+  state.browserInjectStatus = '请选择目标浏览器';
+  renderBrowserInjectModal();
+  els.browserInjectModal.classList.remove('hidden');
+}
+
+function closeBrowserInjectModal() {
+  state.browserInjectModalOpen = false;
+  state.browserInjectCardId = null;
+  els.browserInjectModal.classList.add('hidden');
+}
+
 function openBrowserImportModal() {
   state.browserImportModalOpen = true;
   renderBrowserImportModal();
@@ -1312,10 +1420,11 @@ function applySnapshot(payload) {
   state.browserCards = payload.browserCards || [];
   state.dateFilters = buildRecentDateFilters(state.records);
   state.settings = payload.settings || {};
-  state.browserScanRoot = state.settings.browserScanRoot || state.browserScanRoot || '';
-  if (state.settings.pythonCookieProjectPath) {
-    state.browserScanRoot = state.settings.pythonCookieProjectPath;
-  }
+  state.browserScanRoot = state.settings.selfBuiltWorkspaceDir
+    || state.settings.selfBuiltUserDataRoot
+    || state.settings.browserScanRoot
+    || state.browserScanRoot
+    || '';
   state.statusText = payload.statusText || '后台监听中';
   const cardIds = new Set(state.browserCards.map((item) => item.id));
   state.browserCardSelection = Object.fromEntries(
@@ -1344,6 +1453,7 @@ function applySnapshot(payload) {
 }
 
 function collectSettings() {
+  const selfBuiltWorkspaceDir = (els.selfBuiltWorkspaceDirInput?.value || '').trim();
   return {
     autoJudgmentEnabled: els.autoJudgmentEnabled.checked,
     altQEnabled: els.altQEnabled.checked,
@@ -1352,7 +1462,12 @@ function collectSettings() {
     startupLaunchEnabled: els.startupLaunchEnabled.checked,
     floatingIconEnabled: els.floatingIconEnabled.checked,
     dockToEdgeEnabled: els.dockToEdgeEnabled.checked,
-    postCopyKey: els.postCopyKey.value.trim() || 'Shift'
+    postCopyKey: els.postCopyKey.value.trim() || 'Shift',
+    selfBuiltWorkspaceDir,
+    browserScanRoot: selfBuiltWorkspaceDir,
+    selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
+    selfBuiltChromePath: selfBuiltWorkspaceDir ? `${selfBuiltWorkspaceDir}\\chrome.exe` : '',
+    selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? `${selfBuiltWorkspaceDir}\\chromedriver.exe` : ''
   };
 }
 
@@ -1387,9 +1502,13 @@ function candidateSelectionKey(candidate) {
 }
 
 async function scanBrowserCards(scope = 'all') {
-  const selfBuiltRoot = (els.browserScanRootInput?.value || '').trim();
+  const selfBuiltRoot = state.settings.selfBuiltWorkspaceDir
+    || state.settings.selfBuiltUserDataRoot
+    || state.settings.browserScanRoot
+    || '';
   const result = await window.click2save.scanBrowserCards({
     scope,
+    selfBuiltWorkspaceDir: selfBuiltRoot,
     selfBuiltRoot
   });
   if (!result || result.ok === false) {
@@ -1411,26 +1530,81 @@ async function scanBrowserCards(scope = 'all') {
 async function loadBrowserImportSources() {
   const bitApiUrl = (els.browserImportBitApiUrlInput?.value || '').trim();
   const bitApiToken = (els.browserImportBitApiTokenInput?.value || '').trim();
+  const selfBuiltWorkspaceDir = state.settings.selfBuiltWorkspaceDir || state.settings.selfBuiltUserDataRoot || state.settings.browserScanRoot || '';
   state.browserScanSummary = '正在加载来源列表...';
   renderBrowserImportModal();
-  const result = await window.click2save.getBrowserImportSources({
-    bitApiUrl,
-    bitApiToken
-  });
+  const result = state.browserImportTab === 'self_built'
+    ? await window.click2save.getSelfBuiltImportSources({
+        selfBuiltWorkspaceDir,
+        selfBuiltRoot: selfBuiltWorkspaceDir
+      })
+    : await window.click2save.getBrowserImportSources({
+        bitApiUrl,
+        bitApiToken,
+        selfBuiltWorkspaceDir,
+        selfBuiltRoot: selfBuiltWorkspaceDir
+      });
   if (!result || result.ok === false) {
     alert((result && result.message) || '获取来源失败');
     return;
   }
-  state.browserImportSources = result.results || {
-    chrome_profiles: [],
-    self_built: [],
-    bitbrowser: []
-  };
-  state.browserImportSourceError = (result.results && result.results.bitbrowser_error) || '';
+  if (state.browserImportTab === 'self_built') {
+    state.browserImportSources = {
+      ...(state.browserImportSources || {}),
+      self_built: Array.isArray(result.results) ? result.results : []
+    };
+  } else {
+    state.browserImportSources = result.results || {
+      chrome_profiles: [],
+      self_built: [],
+      bitbrowser: []
+    };
+  }
+  if (result.selfBuiltRoot) {
+    state.browserScanRoot = result.selfBuiltRoot;
+  }
+  state.browserImportSourceError = state.browserImportTab === 'self_built'
+    ? ''
+    : ((result.results && result.results.bitbrowser_error) || '');
   state.browserImportSourceSelection = {};
   state.browserImportSourceIds = [];
   resetBrowserImportSelection();
-  state.browserScanSummary = '来源扫描完成，请勾选来源后再加载 Cookie。';
+  state.browserScanSummary = state.browserImportTab === 'self_built' && state.browserScanRoot
+    ? `来源扫描完成，当前自建目录：${state.browserScanRoot}，共 ${Array.isArray(state.browserImportSources.self_built) ? state.browserImportSources.self_built.length : 0} 个来源`
+    : '来源扫描完成，请勾选来源后再加载 Cookie。';
+  renderBrowserImportModal();
+}
+
+async function openSelfBuiltBrowserFromModal() {
+  const port = (els.browserImportSelfBuiltPortInput?.value || '').trim();
+  if (!port) {
+    alert('请先输入自定义端口');
+    return;
+  }
+  state.browserScanSummary = `正在打开自建浏览器，端口 ${port}...`;
+  renderBrowserImportModal();
+  const result = await window.click2save.openSelfBuiltBrowser({
+    port,
+    selfBuiltWorkspaceDir: state.settings.selfBuiltWorkspaceDir || state.settings.selfBuiltUserDataRoot || state.settings.browserScanRoot || '',
+    selfBuiltRoot: state.settings.selfBuiltWorkspaceDir || state.settings.selfBuiltUserDataRoot || state.settings.browserScanRoot || '',
+    selfBuiltChromePath: state.settings.selfBuiltChromePath || '',
+    selfBuiltChromedriverPath: state.settings.selfBuiltChromedriverPath || ''
+  });
+  if (!result || result.ok === false) {
+    state.browserScanSummary = (result && result.message) || '打开自建浏览器失败';
+    renderBrowserImportModal();
+    alert(state.browserScanSummary);
+    return;
+  }
+  state.browserScanSummary = result.message || `已打开自建浏览器，端口 ${port}`;
+  await loadBrowserImportSources();
+  const nextId = String(result.userDataDir || '').trim();
+  if (nextId) {
+    state.browserImportSourceSelection[nextId] = true;
+    state.browserImportSourceIds = [nextId];
+  }
+  resetBrowserImportSelection();
+  state.browserScanSummary = result.message || `已打开自建浏览器，端口 ${port}`;
   renderBrowserImportModal();
 }
 
@@ -1449,6 +1623,59 @@ async function saveBrowserImportBitConfig() {
   state.settings = nextSettings;
   state.browserScanSummary = '比特浏览器配置已保存';
   renderBrowserImportModal();
+}
+
+async function loadBrowserInjectTargets() {
+  state.browserInjectStatus = '正在刷新目标浏览器...';
+  renderBrowserInjectModal();
+  const result = await window.click2save.getBrowserInjectTargets();
+  if (!result || result.ok === false) {
+    state.browserInjectTargets = [];
+    state.browserInjectStatus = (result && result.message) || '获取目标浏览器失败';
+    renderBrowserInjectModal();
+    return;
+  }
+  state.browserInjectTargets = Array.isArray(result.results) ? result.results : [];
+  const ids = new Set(state.browserInjectTargets.map((item) => browserInjectTargetId(item)));
+  if (!ids.has(state.browserInjectSelectedTargetId)) {
+    state.browserInjectSelectedTargetId = state.browserInjectTargets[0] ? browserInjectTargetId(state.browserInjectTargets[0]) : '';
+  }
+  state.browserInjectStatus = state.browserInjectTargets.length
+    ? `已找到 ${state.browserInjectTargets.length} 个可用目标`
+    : '未找到可用目标浏览器';
+  renderBrowserInjectModal();
+}
+
+async function executeBrowserCardInject() {
+  const cardId = state.browserInjectCardId || state.selectedBrowserCardId;
+  const target = selectedBrowserInjectTarget();
+  if (!cardId) {
+    alert('未选择浏览器卡片');
+    return;
+  }
+  if (!target) {
+    alert('请先选择目标浏览器');
+    return;
+  }
+  const method = target.type === 'chrome_profile'
+    ? 'db_write'
+    : (els.browserInjectMethodDbWrite?.checked ? 'db_write' : 'inject');
+  state.browserInjectMethod = method;
+  state.browserInjectStatus = '正在转移 Cookie...';
+  renderBrowserInjectModal();
+  const result = await window.click2save.executeBrowserCardInject({
+    id: cardId,
+    method,
+    target
+  });
+  if (!result || result.ok === false) {
+    state.browserInjectStatus = (result && result.message) || 'Cookie 转移失败';
+    renderBrowserInjectModal();
+    alert(state.browserInjectStatus);
+    return;
+  }
+  closeBrowserInjectModal();
+  applySnapshot(await window.click2save.getInitialData());
 }
 
 async function batchDeleteBrowserCards() {
@@ -1498,10 +1725,15 @@ async function loadBrowserImportGroups() {
   const bitApiUrl = (els.browserImportBitApiUrlInput?.value || '').trim();
   const bitApiToken = (els.browserImportBitApiTokenInput?.value || '').trim();
 
-  for (const source of selectedSources) {
+  for (let index = 0; index < selectedSources.length; index += 1) {
+    const source = selectedSources[index];
+    state.browserScanSummary = `正在读取 Cookie... (${index + 1}/${selectedSources.length}) ${source.label}`;
+    renderBrowserImportModal();
     const result = await window.click2save.loadBrowserImportGroups({
       bitApiUrl,
       bitApiToken,
+      selfBuiltWorkspaceDir: state.settings.selfBuiltWorkspaceDir || state.settings.selfBuiltUserDataRoot || state.settings.browserScanRoot || '',
+      selfBuiltRoot: state.settings.selfBuiltWorkspaceDir || state.settings.selfBuiltUserDataRoot || state.settings.browserScanRoot || '',
       sourceType: state.browserImportTab,
       sourceId: source.id,
       filterAuth: !!els.browserImportFilterAuth?.checked,
@@ -1695,18 +1927,6 @@ els.browserCardBatchTestBtn?.addEventListener('click', async () => {
   await batchTestBrowserCards();
 });
 
-els.scanAllBrowsersBtn?.addEventListener('click', async () => {
-  await scanBrowserCards('all');
-});
-
-els.scanChromeBtn?.addEventListener('click', async () => {
-  await scanBrowserCards('chrome');
-});
-
-els.scanSelfBuiltBtn?.addEventListener('click', async () => {
-  await scanBrowserCards('self_built');
-});
-
 els.openBrowserImportModalBtn?.addEventListener('click', async () => {
   openBrowserImportModal();
 });
@@ -1750,8 +1970,32 @@ els.assetModalOverlay?.addEventListener('click', closeAssetModal);
 els.closeAssetModalBtn?.addEventListener('click', closeAssetModal);
 els.browserCardModalOverlay?.addEventListener('click', closeBrowserCardModal);
 els.closeBrowserCardModalBtn?.addEventListener('click', closeBrowserCardModal);
+els.browserInjectModalOverlay?.addEventListener('click', closeBrowserInjectModal);
+els.closeBrowserInjectModalBtn?.addEventListener('click', closeBrowserInjectModal);
 els.browserImportModalOverlay?.addEventListener('click', closeBrowserImportModal);
 els.closeBrowserImportModalBtn?.addEventListener('click', closeBrowserImportModal);
+
+els.browserInjectRefreshBtn?.addEventListener('click', async () => {
+  await loadBrowserInjectTargets();
+});
+
+els.browserInjectMethodInject?.addEventListener('change', () => {
+  if (els.browserInjectMethodInject.checked) {
+    state.browserInjectMethod = 'inject';
+    renderBrowserInjectModal();
+  }
+});
+
+els.browserInjectMethodDbWrite?.addEventListener('change', () => {
+  if (els.browserInjectMethodDbWrite.checked) {
+    state.browserInjectMethod = 'db_write';
+    renderBrowserInjectModal();
+  }
+});
+
+els.browserInjectConfirmBtn?.addEventListener('click', async () => {
+  await executeBrowserCardInject();
+});
 
 els.browserImportChromeTabBtn?.addEventListener('click', () => {
   state.browserImportTab = 'chrome_profile';
@@ -1773,6 +2017,10 @@ els.browserImportBitTabBtn?.addEventListener('click', () => {
 
 els.browserImportScanSourcesBtn?.addEventListener('click', async () => {
   await loadBrowserImportSources();
+});
+
+els.browserImportOpenSelfBuiltBtn?.addEventListener('click', async () => {
+  await openSelfBuiltBrowserFromModal();
 });
 
 els.browserImportSaveBitConfigBtn?.addEventListener('click', async () => {
@@ -1869,10 +2117,18 @@ els.deleteRecordBtn.addEventListener('click', async () => {
 });
 
 els.saveSettingsBtn.addEventListener('click', async () => {
-  const result = await window.click2save.saveSettings(collectSettings());
+  const nextSettings = collectSettings();
+  const result = await window.click2save.saveSettings(nextSettings);
   if (result && result.ok === false) {
     alert(result.message || '保存设置失败');
+    return;
   }
+  state.settings = {
+    ...state.settings,
+    ...nextSettings
+  };
+  state.browserScanRoot = nextSettings.selfBuiltWorkspaceDir || state.browserScanRoot;
+  renderSettings();
 });
 
 els.openImagePathBtn.addEventListener('click', async () => {
@@ -1944,12 +2200,8 @@ els.browserCardOpenBtn?.addEventListener('click', async () => {
 els.browserCardInjectBtn?.addEventListener('click', async () => {
   const card = selectedBrowserCard();
   if (!card) return;
-  const result = await window.click2save.injectBrowserCard(card.id);
-  if (result && result.ok === false) {
-    alert(result.message || 'Cookie 转移失败');
-    return;
-  }
-  applySnapshot(await window.click2save.getInitialData());
+  openBrowserInjectModal(card.id);
+  await loadBrowserInjectTargets();
 });
 
 els.browserCardOpenSourceBtn?.addEventListener('click', async () => {
