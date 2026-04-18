@@ -1232,6 +1232,12 @@ async function runCdpScript(payload) {
     "    if($cookie.sourceScheme -ne $null -and $cookie.sourceScheme -ne ''){ $params.sourceScheme=[string]$cookie.sourceScheme }",
     "    if($cookie.sourcePort -ne $null -and $cookie.sourcePort -ne '' -and [int]$cookie.sourcePort -ge 0){ $params.sourcePort=[int]$cookie.sourcePort }",
     "    if($cookie.isPartitioned -and $cookie.topFrameSiteKey){ $params.partitionKey=@{topLevelSite=[string]$cookie.topFrameSiteKey} }",
+    "    if($payload.overwriteExisting){",
+    "      try {",
+    "        if($params.url){ [void](Send-Cdp 'Network.deleteCookies' @{name=$params.name; url=$params.url}) }",
+    "        if($params.domain){ [void](Send-Cdp 'Network.deleteCookies' @{name=$params.name; domain=$params.domain; path=$params.path}) }",
+    "      } catch {}",
+    "    }",
     "    $setResult=Invoke-SetCookie $params",
     "    if($setResult.success){",
     "      $ok++",
@@ -1279,7 +1285,7 @@ async function injectCookies(port, url, cookies) {
     return { ok: false, message: '没有可注入的 Cookie' };
   }
   const wsUrl = await getDevtoolsWsUrl(port);
-  const result = await runCdpScript({ wsUrl, url: String(url || ''), cookies: normalized });
+  const result = await runCdpScript({ wsUrl, url: String(url || ''), cookies: normalized, overwriteExisting: true });
   const okCount = Number(result?.ok || 0);
   const failCount = Number(result?.fail || 0);
   const errors = ensureArray(result?.errors).map((item) => String(item || '').trim()).filter(Boolean);

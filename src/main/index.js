@@ -119,6 +119,28 @@ function readStartupLaunchEnabled() {
   }
 }
 
+function mergeBrowserCardCookies(existingCookies = [], incomingCookies = []) {
+  const merged = new Map();
+  const makeKey = (cookie = {}) => [
+    String(cookie.domain || '').trim().toLowerCase(),
+    String(cookie.path || '/').trim() || '/',
+    String(cookie.name || '').trim()
+  ].join('|');
+
+  for (const cookie of Array.isArray(existingCookies) ? existingCookies : []) {
+    if (!cookie || typeof cookie !== 'object') continue;
+    merged.set(makeKey(cookie), cookie);
+  }
+
+  // 新 Cookie 优先覆盖旧 Cookie，避免卡片中的陈旧会话再次被注入。
+  for (const cookie of Array.isArray(incomingCookies) ? incomingCookies : []) {
+    if (!cookie || typeof cookie !== 'object') continue;
+    merged.set(makeKey(cookie), cookie);
+  }
+
+  return [...merged.values()];
+}
+
 function syncStartupSettingFromSystem() {
   const openAtLogin = readStartupLaunchEnabled();
   if (openAtLogin === null) {
@@ -2125,16 +2147,20 @@ function setupIpc() {
       if (!result.ok) {
         return result;
       }
+      const mergedCookies = mergeBrowserCardCookies(card.cookies, Array.isArray(result.cookies) ? result.cookies : []);
+      const mergedCookieNames = [...new Set(mergedCookies.map((item) => item?.name).filter(Boolean))];
       const updated = storage.updateBrowserCard(id, {
-        cookies: Array.isArray(result.cookies) ? result.cookies : [],
-        cookieNames: Array.isArray(result.cookieNames) ? result.cookieNames : [],
-        cookieCount: Number(result.cookieCount || 0)
+        cookies: mergedCookies,
+        cookieNames: mergedCookieNames,
+        cookieCount: mergedCookies.length
       });
       if (!updated) {
         return { ok: false, message: '卡片更新失败' };
       }
-      sendSnapshot(result.message || 'Cookie 已更新');
-      return { ok: true, message: result.message || 'Cookie 已更新' };
+      const incomingCount = Array.isArray(result.cookies) ? result.cookies.length : 0;
+      const message = `${result.message || 'Cookie 已更新'}；已合并保存 ${mergedCookies.length} 条（本次更新 ${incomingCount} 条，新值优先覆盖旧值）`;
+      sendSnapshot(message);
+      return { ok: true, message };
     } catch (error) {
       return {
         ok: false,
