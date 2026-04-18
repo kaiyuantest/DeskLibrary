@@ -1,5 +1,6 @@
 const { spawn } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const DEFAULT_SELF_BUILT_CANDIDATES = [
@@ -136,6 +137,32 @@ function runPythonJson(scriptPath, args = []) {
   });
 }
 
+function writeTempJsonArg(name, value) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-py-'));
+  const filePath = path.join(dir, `${name}.json`);
+  fs.writeFileSync(filePath, JSON.stringify(value ?? {}, null, 0), 'utf8');
+  return {
+    filePath,
+    cleanup() {
+      try {
+        fs.rmSync(dir, { recursive: true, force: true });
+      } catch {}
+    }
+  };
+}
+
+async function runPythonJsonWithTempArgs(scriptPath, args = [], tempFiles = []) {
+  try {
+    return await runPythonJson(scriptPath, args);
+  } finally {
+    for (const tempFile of tempFiles) {
+      try {
+        tempFile.cleanup();
+      } catch {}
+    }
+  }
+}
+
 async function scanBrowserCards(options = {}) {
   const scriptPath = path.join(__dirname, 'browser_cards_scan.py');
   const scope = options.scope === 'chrome' || options.scope === 'self_built' ? options.scope : 'all';
@@ -146,13 +173,15 @@ async function scanBrowserCards(options = {}) {
 
 async function runPythonBridge(command, payload = {}) {
   const scriptPath = path.join(__dirname, 'python_cookie_bridge.py');
-  const cfgJson = JSON.stringify(payload.cfg || {});
+  const tempFiles = [];
+  const cfgTemp = writeTempJsonArg('cfg', payload.cfg || {});
+  tempFiles.push(cfgTemp);
   const args = [
     command,
     '--project-path',
     payload.projectPath || DEFAULT_PYTHON_COOKIE_PROJECT,
-    '--cfg-json',
-    cfgJson
+    '--cfg-file',
+    cfgTemp.filePath
   ];
 
   if (payload.sourceType) {
@@ -168,13 +197,17 @@ async function runPythonBridge(command, payload = {}) {
     args.push('--merge-domain');
   }
   if (payload.domainsJson) {
-    args.push('--domains-json', payload.domainsJson);
+    const domainsTemp = writeTempJsonArg('domains', JSON.parse(payload.domainsJson));
+    tempFiles.push(domainsTemp);
+    args.push('--domains-file', domainsTemp.filePath);
   }
   if (payload.cardJson) {
-    args.push('--card-json', payload.cardJson);
+    const cardTemp = writeTempJsonArg('card', JSON.parse(payload.cardJson));
+    tempFiles.push(cardTemp);
+    args.push('--card-file', cardTemp.filePath);
   }
 
-  return runPythonJson(scriptPath, args);
+  return runPythonJsonWithTempArgs(scriptPath, args, tempFiles);
 }
 
 module.exports = {

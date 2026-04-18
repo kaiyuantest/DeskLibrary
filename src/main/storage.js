@@ -4,6 +4,18 @@ const crypto = require('crypto');
 const { DEFAULT_PYTHON_COOKIE_PROJECT } = require('./browser-import');
 const IMAGE_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg']);
 
+function normalizeOpenUrl(value, fallbackDomain = '') {
+  const raw = String(value || '').trim();
+  const domain = String(fallbackDomain || '').trim().replace(/^\.+/, '');
+  if (!raw) {
+    return domain ? `https://${domain}` : '';
+  }
+  if (/^[a-zA-Z][a-zA-Z\d+\-.]*:\/\//.test(raw)) {
+    return raw;
+  }
+  return `https://${raw.replace(/^\/+/, '')}`;
+}
+
 class StorageService {
   constructor(baseDir) {
     this.baseDir = baseDir;
@@ -108,9 +120,23 @@ class StorageService {
   normalizeBrowserCard(card) {
     const createdAt = card.createdAt ? new Date(card.createdAt) : new Date();
     const updatedAt = card.updatedAt ? new Date(card.updatedAt) : createdAt;
-    const browserSource = card.browserSource || {};
+    const rawBrowserSource = card.browserSource || card.browser_source || {};
+    const browserSource = {
+      ...rawBrowserSource,
+      profileName: rawBrowserSource.profileName || rawBrowserSource.profile_name || '',
+      displayName: rawBrowserSource.displayName || rawBrowserSource.display_name || '',
+      userDataDir: rawBrowserSource.userDataDir || rawBrowserSource.user_data_dir || '',
+      browserId: rawBrowserSource.browserId || rawBrowserSource.browser_id || '',
+      label: rawBrowserSource.label || '',
+      name: rawBrowserSource.name || ''
+    };
+    const sourceLabel = browserSource.label
+      || browserSource.displayName
+      || browserSource.name
+      || browserSource.profileName
+      || '未知来源';
     const domain = String(card.domain || '').trim() || '.unknown';
-    const openUrl = String(card.openUrl || card.open_url || '').trim() || `https://${domain.replace(/^\.+/, '')}`;
+    const openUrl = normalizeOpenUrl(card.openUrl || card.open_url || '', domain);
     const cookies = Array.isArray(card.cookies) ? card.cookies : [];
     const cookieNames = Array.isArray(card.cookieNames) ? card.cookieNames : cookies.map((item) => item.name).filter(Boolean);
 
@@ -134,7 +160,7 @@ class StorageService {
       test_ok: typeof card.test_ok === 'boolean' ? card.test_ok : null,
       browserSource,
       sourceType: browserSource.type || 'unknown',
-      sourceLabel: browserSource.label || browserSource.displayName || browserSource.name || '未知来源',
+      sourceLabel,
       sourceKey: this.getBrowserSourceKey(browserSource),
       createdAt: createdAt.toISOString(),
       updatedAt: updatedAt.toISOString()
@@ -143,12 +169,12 @@ class StorageService {
 
   getBrowserSourceKey(browserSource = {}) {
     if (browserSource.type === 'chrome_profile') {
-      return `chrome_profile:${browserSource.userDataDir || ''}:${browserSource.profileName || ''}`;
+      return `chrome_profile:${browserSource.userDataDir || browserSource.user_data_dir || ''}:${browserSource.profileName || browserSource.profile_name || browserSource.label || ''}`;
     }
     if (browserSource.type === 'self_built') {
-      return `self_built:${browserSource.userDataDir || ''}`;
+      return `self_built:${browserSource.userDataDir || browserSource.user_data_dir || browserSource.label || ''}`;
     }
-    return `${browserSource.type || 'unknown'}:${browserSource.name || browserSource.displayName || ''}`;
+    return `${browserSource.type || 'unknown'}:${browserSource.browserId || browserSource.browser_id || browserSource.label || browserSource.name || browserSource.displayName || browserSource.display_name || ''}`;
   }
 
   getSettings() {
@@ -307,14 +333,17 @@ class StorageService {
     return nextAsset;
   }
 
-  updateBrowserCard(cardId, updates) {
+  updateBrowserCard(cardId, updates, options = {}) {
     const cards = this.getAllBrowserCards();
     const index = cards.findIndex((item) => item.id === cardId);
     if (index === -1) return null;
+    const nextUpdatedAt = options.preserveUpdatedAt
+      ? (cards[index].updatedAt || cards[index].createdAt || new Date().toISOString())
+      : new Date().toISOString();
     const nextCard = this.normalizeBrowserCard({
       ...cards[index],
       ...updates,
-      updatedAt: new Date().toISOString()
+      updatedAt: nextUpdatedAt
     });
     cards[index] = nextCard;
     this.writeJson(this.browserCardsFile, cards);

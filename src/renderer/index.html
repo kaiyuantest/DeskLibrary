@@ -227,6 +227,21 @@
                 <input id="browserCardSearchInput" class="search-input" type="text" placeholder="搜索域名 / 备注 / 来源" />
               </label>
 
+              <section class="browser-card-bulkbar">
+                <div class="browser-card-bulkbar-info">
+                  <span>已选中</span>
+                  <strong id="browserCardSelectedCount">0</strong>
+                </div>
+                <div class="browser-card-bulkbar-actions">
+                  <button id="browserCardSelectAllBtn" class="text-action" type="button">全选</button>
+                  <button id="browserCardClearSelectionBtn" class="text-action" type="button">清空</button>
+                  <button id="browserCardExpandAllBtn" class="text-action" type="button">全部展开</button>
+                  <button id="browserCardCollapseAllBtn" class="text-action" type="button">全部收起</button>
+                  <button id="browserCardBatchTestBtn" class="text-action" type="button">批量测试</button>
+                  <button id="browserCardBatchDeleteBtn" class="text-action danger" type="button">批量删除</button>
+                </div>
+              </section>
+
               <section id="browserCardsList" class="cards-grid"></section>
             </section>
 
@@ -340,7 +355,7 @@
 
     <div id="browserCardModal" class="modal hidden">
       <div id="browserCardModalOverlay" class="modal-overlay"></div>
-      <section class="modal-card">
+      <section class="modal-card browser-card-modal-card">
         <div class="modal-head">
           <div>
             <div id="browserCardModalTitle" class="modal-title">请选择一张浏览器卡片</div>
@@ -349,18 +364,38 @@
           <button id="closeBrowserCardModalBtn" class="icon-action" title="关闭">×</button>
         </div>
 
-        <div id="browserCardModalMeta" class="modal-meta"></div>
+        <div id="browserCardModalMeta" class="modal-meta browser-card-modal-meta"></div>
 
-        <div class="modal-body">
-          <div id="browserCardCookieNames" class="asset-detail-paths"></div>
-          <textarea id="browserCardRemarkInput" rows="4" placeholder="备注：账号用途、来源说明、站点提示"></textarea>
-          <input id="browserCardOpenUrlInput" type="text" placeholder="打开地址，例如 https://example.com" />
+        <div class="modal-body browser-card-modal-body">
+          <label class="browser-card-form-block">
+            <span class="control-label">卡片名称</span>
+            <input id="browserCardNameInput" type="text" placeholder="卡片名称 / 标题" />
+          </label>
+          <label class="browser-card-form-block">
+            <span class="control-label">访问地址</span>
+            <input id="browserCardOpenUrlInput" type="text" placeholder="打开地址，例如 https://example.com/path" />
+          </label>
+          <div class="browser-card-form-grid">
+            <label class="browser-card-form-block">
+              <span class="control-label">账号</span>
+              <input id="browserCardUsernameInput" type="text" placeholder="账号 / 用户名" />
+            </label>
+            <label class="browser-card-form-block">
+              <span class="control-label">密码</span>
+              <input id="browserCardPasswordInput" type="text" placeholder="密码，本地保存" />
+            </label>
+          </div>
+          <label class="browser-card-form-block">
+            <span class="control-label">备注</span>
+            <textarea id="browserCardRemarkInput" rows="3" placeholder="备注：用途、站点提示、来源说明"></textarea>
+          </label>
         </div>
 
         <div class="modal-actions">
           <button id="browserCardOpenBtn" class="text-action" type="button">一键打开</button>
+          <button id="browserCardInjectBtn" class="text-action" type="button">Cookie 转移</button>
           <button id="browserCardOpenSourceBtn" class="text-action" type="button">打开来源目录</button>
-          <button id="browserCardSaveBtn" class="text-action" type="button">保存备注</button>
+          <button id="browserCardSaveBtn" class="text-action" type="button">保存修改</button>
           <button id="browserCardDeleteBtn" class="text-action danger" type="button">删除卡片</button>
         </div>
       </section>
@@ -384,35 +419,58 @@
         </div>
 
         <div class="modal-body">
-          <div class="browser-import-source-panel">
-            <label class="control-card search-card asset-search-card">
-              <span class="control-label">Python Cookie 项目目录</span>
-              <input id="browserScanRootInput" class="search-input" type="text" placeholder="填写 Python cookie_manager 项目目录" />
-            </label>
-            <label class="control-card search-card asset-search-card">
-              <span class="control-label">来源列表</span>
-              <select id="browserImportSourceSelect" class="search-input"></select>
-            </label>
-            <div class="browser-import-options">
-              <label class="setting-row"><span>仅认证 Cookie</span><input id="browserImportFilterAuth" type="checkbox" checked /></label>
-              <label class="setting-row"><span>按根域名合并</span><input id="browserImportMergeDomain" type="checkbox" checked /></label>
-            </div>
-            <button id="browserImportLoadBtn" class="save-pill" type="button">加载 Cookie</button>
-          </div>
+          <div class="browser-import-layout">
+            <section class="browser-import-config-panel">
+              <div id="browserImportBitConfigBox" class="browser-import-config-grid">
+                <label class="control-card asset-search-card browser-import-config-card">
+                  <span class="control-label">比特 API 地址</span>
+                  <input id="browserImportBitApiUrlInput" class="search-input" type="text" placeholder="http://127.0.0.1:54345" />
+                </label>
+                <label class="control-card asset-search-card browser-import-config-card">
+                  <span class="control-label">比特 API Token</span>
+                  <input id="browserImportBitApiTokenInput" class="search-input" type="text" placeholder="如未启用可留空" />
+                </label>
+              </div>
+              <div class="browser-import-actions-row">
+                <button id="browserImportSaveBitConfigBtn" class="text-action" type="button">保存比特配置</button>
+                <button id="browserImportScanSourcesBtn" class="save-pill compact" type="button">开始扫描来源</button>
+              </div>
+            </section>
 
-          <div class="browser-import-groups-panel">
-            <div class="section-head compact">
-              <span>域名列表</span>
-              <span id="browserImportSelectedCount" class="count-chip">0</span>
-            </div>
-            <section id="browserImportGroupsList" class="browser-import-groups-list"></section>
-          </div>
-        </div>
+            <section class="browser-import-source-panel">
+              <div class="browser-import-panel-head">
+                <div class="section-head compact">
+                  <span>来源列表</span>
+                  <span id="browserImportSourceCount" class="count-chip">0</span>
+                </div>
+                <div class="browser-import-actions-row compact">
+                  <button id="browserImportSourceSelectAllBtn" class="text-action" type="button">来源全选</button>
+                  <button id="browserImportSourceClearBtn" class="text-action" type="button">清空来源</button>
+                </div>
+              </div>
+              <section id="browserImportSourcesList" class="browser-import-sources-list"></section>
+            </section>
 
-        <div class="modal-actions">
-          <button id="browserImportSelectAllBtn" class="text-action" type="button">全选</button>
-          <button id="browserImportClearBtn" class="text-action" type="button">清空</button>
-          <button id="browserImportConfirmBtn" class="text-action" type="button">导入选中</button>
+            <section class="browser-import-groups-panel">
+              <div class="browser-import-panel-head">
+                <div class="section-head compact">
+                  <span>域名列表</span>
+                  <span id="browserImportSelectedCount" class="count-chip">0</span>
+                </div>
+                <div class="browser-import-actions-row compact">
+                  <button id="browserImportLoadBtn" class="save-pill compact" type="button">加载 Cookie</button>
+                  <button id="browserImportSelectAllBtn" class="text-action" type="button">全选</button>
+                  <button id="browserImportClearBtn" class="text-action" type="button">清空</button>
+                  <button id="browserImportConfirmBtn" class="text-action" type="button">导入选中</button>
+                </div>
+              </div>
+              <div class="browser-import-options">
+                <label class="setting-row"><span>仅认证 Cookie</span><input id="browserImportFilterAuth" type="checkbox" /></label>
+                <label class="setting-row"><span>按根域名合并</span><input id="browserImportMergeDomain" type="checkbox" /></label>
+              </div>
+              <section id="browserImportGroupsList" class="browser-import-groups-list"></section>
+            </section>
+          </div>
         </div>
       </section>
     </div>

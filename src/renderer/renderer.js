@@ -19,6 +19,8 @@ const state = {
   assetSearchKeyword: '',
   assetTypeFilter: '全部',
   browserCardSearchKeyword: '',
+  browserCardSelection: {},
+  browserCardCollapsed: {},
   browserScanRoot: '',
   browserScanSummary: '扫描后可选择域名卡片导入。',
   browserScanSelection: {},
@@ -29,13 +31,16 @@ const state = {
     self_built: [],
     bitbrowser: []
   },
+  browserImportSourceSelection: {},
   browserImportGroups: [],
-  browserImportSourceId: '',
-  browserImportFilterAuth: true,
-  browserImportMergeDomain: true,
+  browserImportSourceIds: [],
+  browserImportSourceError: '',
+  browserImportFilterAuth: false,
+  browserImportMergeDomain: false,
   statusText: '后台监听中',
   modalOpen: false,
   browserCardModalOpen: false,
+  browserCardModalFocus: '',
   mobileDateToolsOpen: false,
   mobileFilterToolsOpen: false,
   assetDropActive: false
@@ -96,6 +101,13 @@ const els = {
   scanSelfBuiltBtn: document.getElementById('scanSelfBuiltBtn'),
   importSelectedBrowsersBtn: document.getElementById('importSelectedBrowsersBtn'),
   browserCardSearchInput: document.getElementById('browserCardSearchInput'),
+  browserCardSelectedCount: document.getElementById('browserCardSelectedCount'),
+  browserCardSelectAllBtn: document.getElementById('browserCardSelectAllBtn'),
+  browserCardClearSelectionBtn: document.getElementById('browserCardClearSelectionBtn'),
+  browserCardExpandAllBtn: document.getElementById('browserCardExpandAllBtn'),
+  browserCardCollapseAllBtn: document.getElementById('browserCardCollapseAllBtn'),
+  browserCardBatchTestBtn: document.getElementById('browserCardBatchTestBtn'),
+  browserCardBatchDeleteBtn: document.getElementById('browserCardBatchDeleteBtn'),
   browserCardsList: document.getElementById('browserCardsList'),
   assetNoteInput: document.getElementById('assetNoteInput'),
   assetOpenPrimaryBtn: document.getElementById('assetOpenPrimaryBtn'),
@@ -151,10 +163,13 @@ const els = {
   browserCardModalTitle: document.getElementById('browserCardModalTitle'),
   browserCardModalSubline: document.getElementById('browserCardModalSubline'),
   browserCardModalMeta: document.getElementById('browserCardModalMeta'),
-  browserCardCookieNames: document.getElementById('browserCardCookieNames'),
+  browserCardNameInput: document.getElementById('browserCardNameInput'),
   browserCardRemarkInput: document.getElementById('browserCardRemarkInput'),
   browserCardOpenUrlInput: document.getElementById('browserCardOpenUrlInput'),
+  browserCardUsernameInput: document.getElementById('browserCardUsernameInput'),
+  browserCardPasswordInput: document.getElementById('browserCardPasswordInput'),
   browserCardOpenBtn: document.getElementById('browserCardOpenBtn'),
+  browserCardInjectBtn: document.getElementById('browserCardInjectBtn'),
   browserCardOpenSourceBtn: document.getElementById('browserCardOpenSourceBtn'),
   browserCardSaveBtn: document.getElementById('browserCardSaveBtn'),
   browserCardDeleteBtn: document.getElementById('browserCardDeleteBtn')
@@ -166,7 +181,15 @@ const els = {
   browserImportChromeTabBtn: document.getElementById('browserImportChromeTabBtn'),
   browserImportSelfBuiltTabBtn: document.getElementById('browserImportSelfBuiltTabBtn'),
   browserImportBitTabBtn: document.getElementById('browserImportBitTabBtn'),
-  browserImportSourceSelect: document.getElementById('browserImportSourceSelect'),
+  browserImportBitApiUrlInput: document.getElementById('browserImportBitApiUrlInput'),
+  browserImportBitApiTokenInput: document.getElementById('browserImportBitApiTokenInput'),
+  browserImportBitConfigBox: document.getElementById('browserImportBitConfigBox'),
+  browserImportSaveBitConfigBtn: document.getElementById('browserImportSaveBitConfigBtn'),
+  browserImportScanSourcesBtn: document.getElementById('browserImportScanSourcesBtn'),
+  browserImportSourceSelectAllBtn: document.getElementById('browserImportSourceSelectAllBtn'),
+  browserImportSourceClearBtn: document.getElementById('browserImportSourceClearBtn'),
+  browserImportSourceCount: document.getElementById('browserImportSourceCount'),
+  browserImportSourcesList: document.getElementById('browserImportSourcesList'),
   browserImportFilterAuth: document.getElementById('browserImportFilterAuth'),
   browserImportMergeDomain: document.getElementById('browserImportMergeDomain'),
   browserImportLoadBtn: document.getElementById('browserImportLoadBtn'),
@@ -369,14 +392,64 @@ function browserCardsForCurrentPage() {
 
   return cards.filter((item) => {
     const haystack = [
+      item.nameDisplay,
       item.domainDisplay,
       item.remark,
       item.sourceLabel,
       item.openUrl,
+      item.test_title,
+      item.lastUsedMethodDisplay,
+      item.last_used_at,
+      item.last_used_method,
+      (item.last_used_at || item.lastUsedMethodDisplay) ? '最近使用' : '',
       (item.cookieNames || []).join(' ')
     ].join('\n').toLowerCase();
     return haystack.includes(keyword);
   });
+}
+
+function sourceTypeDisplay(type) {
+  if (type === 'chrome_profile') return '系统 Chrome';
+  if (type === 'self_built') return '自建浏览器';
+  if (type === 'bitbrowser' || type === 'bitbrowser_api') return '比特浏览器';
+  return '未知来源';
+}
+
+function browserSourceLabel(card) {
+  const source = card.browserSource || {};
+  return source.label || source.displayName || source.name || source.profileName || card.sourceLabel || '未知来源';
+}
+
+function groupBrowserCardsBySource(cards) {
+  const groups = new Map();
+  cards.forEach((card) => {
+    const label = browserSourceLabel(card);
+    const key = card.sourceKey || `${card.sourceType || 'unknown'}:${label}`;
+    if (!groups.has(key)) {
+      groups.set(key, {
+        key,
+        label,
+        sourceType: card.sourceType || 'unknown',
+        items: []
+      });
+    }
+    groups.get(key).items.push(card);
+  });
+  return [...groups.values()].sort((left, right) => left.label.localeCompare(right.label, 'zh-CN'));
+}
+
+function selectedBrowserCardIds() {
+  return browserCardsForCurrentPage()
+    .filter((item) => state.browserCardSelection[item.id])
+    .map((item) => item.id);
+}
+
+function browserCardStyleVars(card) {
+  return [
+    '--browser-card-border: rgba(104, 129, 168, 0.18)',
+    '--browser-card-glow: rgba(61, 87, 120, 0.1)',
+    '--browser-card-wash: rgba(255, 255, 255, 0.96)'
+  ].join(';');
 }
 
 function renderSearchTools() {
@@ -534,31 +607,60 @@ function buildBrowserScanCandidateCard(candidate, checked) {
 }
 
 function buildBrowserCard(card) {
+  const selected = !!state.browserCardSelection[card.id];
+  const host = card.domainDisplay || card.nameDisplay || 'unknown';
+  const faviconUrl = host && host !== 'unknown'
+    ? `https://${host}/favicon.ico`
+    : '';
   const remarkPreview = card.remark
-    ? `💬 ${card.remark.slice(0, 5)}${card.remark.length > 5 ? '…' : ''}`
+    ? card.remark.slice(0, 18)
     : '';
   const credentialPreview = [
-    card.username ? `👤${card.username.slice(0, 10)}` : '',
-    card.password ? `🔑${'*'.repeat(Math.min(String(card.password).length, 8))}` : ''
-  ].filter(Boolean).join('  ');
+    card.username ? `账号 ${card.username.slice(0, 10)}` : '',
+    card.password ? `密码 ${'*'.repeat(Math.min(String(card.password).length, 6))}` : ''
+  ].filter(Boolean).join(' · ');
+  const testTitle = card.test_title ? String(card.test_title).slice(0, 34) : '';
+  const recentUse = card.lastUsedMethodDisplay
+    ? `${card.lastUsedMethodDisplay}${card.last_used_at ? ` · ${card.last_used_at}` : ''}`
+    : '';
+  const sourceLabel = browserSourceLabel(card);
   return `
-    <div class="record-card-actions">
-      <div class="browser-card-avatar">${escapeHtml((card.nameDisplay || '?').slice(0, 1).toUpperCase())}</div>
-      <div class="asset-card-actions">
-        <button class="card-copy-btn" data-browser-card-edit-url="${card.id}" title="编辑访问地址">🌐</button>
-        <button class="card-copy-btn" data-browser-card-edit="${card.id}" title="编辑备注账号密码">···</button>
+    <div class="browser-card-surface" style="${escapeHtml(browserCardStyleVars(card))}">
+      <div class="record-card-actions browser-card-topbar">
+        ${faviconUrl ? `<img class="browser-card-favicon-bg" src="${escapeHtml(faviconUrl)}" alt="" loading="lazy" onerror="this.outerHTML='<span class=&quot;browser-card-favicon-bg browser-card-favicon-placeholder&quot;>无</span>'" />` : '<span class="browser-card-favicon-bg browser-card-favicon-placeholder">无</span>'}
+        <label class="browser-card-checkwrap" title="选择卡片">
+          <input class="browser-scan-checkbox browser-card-toggle" type="checkbox" data-browser-card-select="${card.id}"${selected ? ' checked' : ''} />
+        </label>
+        <div class="asset-card-actions browser-card-tools">
+          <button class="card-copy-btn" data-browser-card-test="${card.id}" title="测试网站连通性">测</button>
+          <button class="card-copy-btn" data-browser-card-edit-url="${card.id}" title="编辑地址、备注、账号密码">✎</button>
+        </div>
       </div>
-    </div>
-    <div class="record-title">${escapeHtml(card.nameDisplay)}</div>
-    ${remarkPreview ? `<div class="browser-card-meta-line">${escapeHtml(remarkPreview)}</div>` : ''}
-    ${credentialPreview ? `<div class="browser-card-meta-line">${escapeHtml(credentialPreview)}</div>` : ''}
-    <div class="browser-card-meta-line">🌐 ${escapeHtml((card.openUrl || '').slice(0, 30))} · ${escapeHtml(card.cookieCount)}条</div>
-    ${card.test_title ? `<div class="browser-card-meta-line ${card.test_ok ? 'is-ok' : 'is-bad'}">${escapeHtml(card.test_ok ? '✅' : '❌')} ${escapeHtml(String(card.test_title).slice(0, 22))}</div>` : ''}
-    ${card.last_used_at ? `<div class="browser-card-meta-line">🕐 ${escapeHtml(card.last_used_at)} ${escapeHtml(card.lastUsedMethodDisplay || '')}</div>` : ''}
-    <div class="record-footer">
-      <button class="browser-card-action primary" data-browser-card-open="${card.id}" title="默认打开">默认打开</button>
-      <button class="browser-card-action secondary" data-browser-card-inject="${card.id}" title="指定打开">指定打开</button>
-      <button class="browser-card-action danger" data-browser-card-delete-inline="${card.id}" title="删除">删除</button>
+      <div class="browser-card-headline">
+        <div class="browser-card-avatar">${escapeHtml((card.nameDisplay || '?').slice(0, 1).toUpperCase())}</div>
+        <div class="browser-card-titlebox">
+          <div class="record-title browser-card-title">${escapeHtml(card.nameDisplay)}</div>
+          <div class="browser-card-meta-line">${escapeHtml(card.domainDisplay)}</div>
+        </div>
+      </div>
+      ${recentUse ? `<div class="browser-card-meta-line">${escapeHtml(recentUse)}</div>` : ''}
+      <div class="browser-card-meta-line">${escapeHtml(sourceLabel)}</div>
+      ${remarkPreview ? `<div class="browser-card-meta-line">${escapeHtml(remarkPreview)}</div>` : ''}
+      ${credentialPreview ? `<div class="browser-card-meta-line">${escapeHtml(credentialPreview)}</div>` : ''}
+      ${testTitle ? `<div class="browser-card-meta-line">${escapeHtml(testTitle)}</div>` : ''}
+      <div class="browser-card-meta-row">
+        <span class="browser-card-chip">${escapeHtml(card.cookieCount)} Cookie</span>
+        ${card.test_ok === true
+          ? '<span class="browser-card-chip ok">可连接</span>'
+          : card.test_ok === false
+            ? '<span class="browser-card-chip bad">连接异常</span>'
+            : '<span class="browser-card-chip">未测试</span>'}
+      </div>
+      <div class="record-footer browser-card-footer">
+        <button class="browser-card-action primary" data-browser-card-open="${card.id}" title="默认打开">打开</button>
+        <button class="browser-card-action secondary" data-browser-card-inject="${card.id}" title="指定打开">注入</button>
+        <button class="browser-card-action danger" data-browser-card-delete-inline="${card.id}" title="删除">删</button>
+      </div>
     </div>
   `;
 }
@@ -723,6 +825,9 @@ function renderBrowserCardsList() {
   if (!els.browserCardsList) return;
   const cards = browserCardsForCurrentPage();
   els.browserCardCount.textContent = `${cards.length} 条`;
+  if (els.browserCardSelectedCount) {
+    els.browserCardSelectedCount.textContent = String(selectedBrowserCardIds().length);
+  }
   els.browserCardsList.innerHTML = '';
 
   if (!cards.length) {
@@ -733,58 +838,118 @@ function renderBrowserCardsList() {
     return;
   }
 
-  cards.forEach((card) => {
-    const item = document.createElement('article');
-    item.className = `record-item ${card.id === state.selectedBrowserCardId ? 'active' : ''}`;
-    item.tabIndex = 0;
-    item.innerHTML = buildBrowserCard(card);
-    item.onclick = () => {
-      state.selectedBrowserCardId = card.id;
-      openBrowserCardModal();
-    };
-    item.onkeydown = (event) => {
-      if (event.key === 'Enter' || event.key === ' ') {
-        event.preventDefault();
+  const groupsWrap = document.createElement('div');
+  groupsWrap.className = 'browser-card-groups';
+
+  groupBrowserCardsBySource(cards).forEach((group) => {
+    const collapsed = !!state.browserCardCollapsed[group.key];
+    const section = document.createElement('section');
+    section.className = 'browser-card-group';
+    section.innerHTML = `
+      <div class="browser-card-group-head">
+        <div class="browser-card-group-title">
+          <strong>${escapeHtml(group.label)}</strong>
+          <span>${escapeHtml(sourceTypeDisplay(group.sourceType))}</span>
+        </div>
+        <div class="browser-card-group-head-actions">
+          <span class="count-chip">${group.items.length} 张</span>
+          <button class="text-action" data-browser-group-select="${escapeHtml(group.key)}" type="button">本组全选</button>
+          <button class="text-action" data-browser-group-toggle="${escapeHtml(group.key)}" type="button">${collapsed ? '展开' : '收起'}</button>
+        </div>
+      </div>
+      <div class="browser-card-group-grid${collapsed ? ' hidden' : ''}"></div>
+    `;
+    const grid = section.querySelector('.browser-card-group-grid');
+    section.querySelector('[data-browser-group-select]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      group.items.forEach((item) => {
+        state.browserCardSelection[item.id] = true;
+      });
+      renderBrowserCardsList();
+    });
+    section.querySelector('[data-browser-group-toggle]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.browserCardCollapsed[group.key] = !state.browserCardCollapsed[group.key];
+      renderBrowserCardsList();
+    });
+
+    group.items.forEach((card) => {
+      const item = document.createElement('article');
+      item.className = `record-item browser-card-item ${card.id === state.selectedBrowserCardId ? 'active' : ''} ${state.browserCardSelection[card.id] ? 'selected' : ''}`;
+      item.tabIndex = 0;
+      item.innerHTML = buildBrowserCard(card);
+      item.onclick = () => {
         state.selectedBrowserCardId = card.id;
         openBrowserCardModal();
-      }
-    };
-    item.querySelector('[data-browser-card-open]')?.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      const result = await window.click2save.openBrowserCard(card.id);
-      if (result && result.ok === false) {
-        alert(result.message || '打开失败');
-      }
+      };
+      item.onkeydown = (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          state.selectedBrowserCardId = card.id;
+          openBrowserCardModal();
+        }
+      };
+      item.querySelector('[data-browser-card-open]')?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const result = await window.click2save.openBrowserCard(card.id);
+        if (result && result.ok === false) {
+          alert(result.message || '打开失败');
+        }
+      });
+      item.querySelector('[data-browser-card-test]')?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const result = await window.click2save.checkBrowserCardConnectivity([card.id]);
+        if (result && result.ok === false) {
+          alert(result.message || '测试失败');
+          return;
+        }
+        applySnapshot(await window.click2save.getInitialData());
+      });
+      item.querySelector('[data-browser-card-inject]')?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const result = await window.click2save.injectBrowserCard(card.id);
+        if (result && result.ok === false) {
+          alert(result.message || 'Cookie 转移失败');
+          return;
+        }
+        applySnapshot(await window.click2save.getInitialData());
+      });
+      item.querySelector('[data-browser-card-edit-url]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+        state.selectedBrowserCardId = card.id;
+        openBrowserCardModal('openUrl');
+      });
+      item.querySelector('[data-browser-card-source]')?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const result = await window.click2save.openBrowserCardSource(card.id);
+        if (result && result.ok === false) {
+          alert(result.message || '打开失败');
+        }
+      });
+      item.querySelector('[data-browser-card-delete-inline]')?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        if (!window.confirm('确认删除这张浏览器卡片吗？')) return;
+        const result = await window.click2save.deleteBrowserCard(card.id);
+        if (result && result.ok === false) {
+          alert(result.message || '删除失败');
+          return;
+        }
+        applySnapshot(await window.click2save.getInitialData());
+      });
+      item.querySelector('[data-browser-card-select]')?.addEventListener('click', (event) => {
+        event.stopPropagation();
+      });
+      item.querySelector('[data-browser-card-select]')?.addEventListener('change', (event) => {
+        state.browserCardSelection[card.id] = !!event.target.checked;
+        renderBrowserCardsList();
+      });
+      grid.appendChild(item);
     });
-    item.querySelector('[data-browser-card-edit]')?.addEventListener('click', (event) => {
-      event.stopPropagation();
-      state.selectedBrowserCardId = card.id;
-      openBrowserCardModal();
-    });
-    item.querySelector('[data-browser-card-edit-url]')?.addEventListener('click', (event) => {
-      event.stopPropagation();
-      state.selectedBrowserCardId = card.id;
-      openBrowserCardModal();
-    });
-    item.querySelector('[data-browser-card-source]')?.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      const result = await window.click2save.openBrowserCardSource(card.id);
-      if (result && result.ok === false) {
-        alert(result.message || '打开失败');
-      }
-    });
-    item.querySelector('[data-browser-card-delete-inline]')?.addEventListener('click', async (event) => {
-      event.stopPropagation();
-      if (!window.confirm('确认删除这张浏览器卡片吗？')) return;
-      const result = await window.click2save.deleteBrowserCard(card.id);
-      if (result && result.ok === false) {
-        alert(result.message || '删除失败');
-        return;
-      }
-      applySnapshot(await window.click2save.getInitialData());
-    });
-    els.browserCardsList.appendChild(item);
+
+    groupsWrap.appendChild(section);
   });
+
+  els.browserCardsList.appendChild(groupsWrap);
 }
 
 function renderAssetModal() {
@@ -832,25 +997,26 @@ function renderBrowserCardModal() {
     els.browserCardModalTitle.textContent = '请选择一张浏览器卡片';
     els.browserCardModalSubline.textContent = '-';
     els.browserCardModalMeta.innerHTML = '';
-    els.browserCardCookieNames.innerHTML = '';
+    els.browserCardNameInput.value = '';
     els.browserCardRemarkInput.value = '';
     els.browserCardOpenUrlInput.value = '';
+    els.browserCardUsernameInput.value = '';
+    els.browserCardPasswordInput.value = '';
     return;
   }
 
   els.browserCardModalTitle.textContent = card.domainDisplay;
   els.browserCardModalSubline.textContent = `${card.sourceLabel} · ${card.updatedAtDisplay}`;
+  els.browserCardNameInput.value = card.nameDisplay || '';
   els.browserCardRemarkInput.value = card.remark || '';
   els.browserCardOpenUrlInput.value = card.openUrl || '';
+  els.browserCardUsernameInput.value = card.username || '';
+  els.browserCardPasswordInput.value = card.password || '';
   els.browserCardModalMeta.innerHTML = `
     <div><span class="meta-label">来源</span><span>${escapeHtml(card.sourceLabel)}</span></div>
     <div><span class="meta-label">类型</span><span>${escapeHtml(card.sourceTypeDisplay)}</span></div>
     <div><span class="meta-label">域名</span><span>${escapeHtml(card.domainDisplay)}</span></div>
     <div><span class="meta-label">Cookie</span><span>${escapeHtml(card.cookieCount)} 条</span></div>
-  `;
-  els.browserCardCookieNames.innerHTML = `
-    <div><span class="meta-label">打开地址</span><span class="break-all">${escapeHtml(card.openUrl || '-')}</span></div>
-    <div><span class="meta-label">Cookie 名称</span><span class="break-all">${escapeHtml((card.cookieNames || []).join(', ') || '-')}</span></div>
   `;
 }
 
@@ -860,6 +1026,16 @@ function currentBrowserImportSources() {
   return state.browserImportSources.chrome_profiles || [];
 }
 
+function selectedBrowserImportSources() {
+  const sources = currentBrowserImportSources();
+  return sources.filter((item) => state.browserImportSourceSelection[item.id]);
+}
+
+function resetBrowserImportSelection() {
+  state.browserImportGroups = [];
+  state.browserScanSelection = {};
+}
+
 function renderBrowserImportModal() {
   if (!els.browserImportModal) return;
   els.browserImportChromeTabBtn?.classList.toggle('active', state.browserImportTab === 'chrome_profile');
@@ -867,16 +1043,58 @@ function renderBrowserImportModal() {
   els.browserImportBitTabBtn?.classList.toggle('active', state.browserImportTab === 'bitbrowser_api');
   els.browserImportFilterAuth.checked = !!state.browserImportFilterAuth;
   els.browserImportMergeDomain.checked = !!state.browserImportMergeDomain;
+  els.browserImportBitConfigBox?.classList.toggle('hidden', state.browserImportTab !== 'bitbrowser_api');
+  els.browserImportSaveBitConfigBtn?.classList.toggle('hidden', state.browserImportTab !== 'bitbrowser_api');
+  if (els.browserImportBitApiUrlInput) {
+    els.browserImportBitApiUrlInput.value = state.settings.bitApiUrl || 'http://127.0.0.1:54345';
+  }
+  if (els.browserImportBitApiTokenInput) {
+    els.browserImportBitApiTokenInput.value = state.settings.bitApiToken || '';
+  }
   els.browserImportStatus.textContent = state.browserScanSummary || '请选择来源并加载 Cookie';
 
   const sources = currentBrowserImportSources();
-  const nextSourceId = sources.some((item) => item.id === state.browserImportSourceId)
-    ? state.browserImportSourceId
-    : (sources[0]?.id || '');
-  state.browserImportSourceId = nextSourceId;
-  els.browserImportSourceSelect.innerHTML = sources.length
-    ? sources.map((item) => `<option value="${escapeHtml(item.id)}"${item.id === nextSourceId ? ' selected' : ''}>${escapeHtml(item.label)}</option>`).join('')
-    : '<option value="">暂无可用来源</option>';
+  if (els.browserImportSourceCount) {
+    els.browserImportSourceCount.textContent = `${sources.length}`;
+  }
+  state.browserImportSourceIds = state.browserImportSourceIds.filter((id) => sources.some((item) => item.id === id));
+  if (!state.browserImportSourceIds.length && sources.length === 1) {
+    state.browserImportSourceIds = [sources[0].id];
+    state.browserImportSourceSelection[sources[0].id] = true;
+  }
+
+  els.browserImportSourcesList.innerHTML = '';
+  if (!sources.length) {
+    const emptySource = document.createElement('div');
+    emptySource.className = 'quick-empty';
+    emptySource.textContent = state.browserImportTab === 'bitbrowser_api'
+      ? (state.browserImportSourceError || '没有读取到比特浏览器来源，请确认 API 地址、Token 和比特主程序状态。')
+      : '点击“开始扫描来源”后，这里会显示可选来源。';
+    els.browserImportSourcesList.appendChild(emptySource);
+  } else {
+    sources.forEach((item) => {
+      const checked = !!state.browserImportSourceSelection[item.id];
+      const row = document.createElement('label');
+      row.className = 'browser-import-source-row';
+      row.innerHTML = `
+        <input type="checkbox" class="browser-scan-checkbox" data-import-source="${escapeHtml(item.id)}"${checked ? ' checked' : ''} />
+        <div class="browser-import-source-main">
+          <strong>${escapeHtml(item.label)}</strong>
+          <span>${escapeHtml(sourceTypeDisplay(item.type || state.browserImportTab))}</span>
+        </div>
+      `;
+      row.querySelector('[data-import-source]')?.addEventListener('change', (event) => {
+        const enabled = !!event.target.checked;
+        state.browserImportSourceSelection[item.id] = enabled;
+        state.browserImportSourceIds = enabled
+          ? [...new Set([...state.browserImportSourceIds, item.id])]
+          : state.browserImportSourceIds.filter((id) => id !== item.id);
+        resetBrowserImportSelection();
+        renderBrowserImportModal();
+      });
+      els.browserImportSourcesList.appendChild(row);
+    });
+  }
 
   els.browserImportGroupsList.innerHTML = '';
   const groups = state.browserImportGroups || [];
@@ -889,21 +1107,68 @@ function renderBrowserImportModal() {
     return;
   }
 
+  const groupMap = new Map();
   groups.forEach((group) => {
-    const row = document.createElement('label');
-    row.className = 'browser-import-group-row';
-    row.innerHTML = `
-      <input type="checkbox" class="browser-scan-checkbox" data-import-group="${escapeHtml(group.selectionKey)}"${state.browserScanSelection[group.selectionKey] ? ' checked' : ''} />
-      <div class="browser-import-group-main">
-        <strong>${escapeHtml(group.domain)}</strong>
-        <span>${escapeHtml(group.cookieCount)} 条 · ${group.authCount > 0 ? `${group.authCount} 条认证` : '无认证 Cookie'}</span>
+    const sourceKey = `${group.sourceType || 'unknown'}|${group.sourceId || ''}|${group.sourceLabel || '未知来源'}`;
+    if (!groupMap.has(sourceKey)) {
+      groupMap.set(sourceKey, {
+        key: sourceKey,
+        label: group.sourceLabel || '未知来源',
+        type: group.sourceType || 'unknown',
+        items: []
+      });
+    }
+    groupMap.get(sourceKey).items.push(group);
+  });
+
+  [...groupMap.values()].forEach((sourceGroup) => {
+    const section = document.createElement('section');
+    section.className = 'browser-import-domain-group';
+    section.innerHTML = `
+      <div class="browser-card-group-head">
+        <div class="browser-card-group-title">
+          <strong>${escapeHtml(sourceGroup.label)}</strong>
+          <span>${escapeHtml(sourceTypeDisplay(sourceGroup.type))}</span>
+        </div>
+        <div class="browser-card-group-head-actions">
+          <span class="count-chip">${sourceGroup.items.length} 个域</span>
+          <button class="text-action" data-import-group-select-source="${escapeHtml(sourceGroup.key)}" type="button">本组全选</button>
+          <button class="text-action" data-import-group-clear-source="${escapeHtml(sourceGroup.key)}" type="button">本组清空</button>
+        </div>
       </div>
+      <div class="browser-import-domain-list"></div>
     `;
-    row.querySelector('[data-import-group]')?.addEventListener('change', (event) => {
-      state.browserScanSelection[group.selectionKey] = !!event.target.checked;
+    section.querySelector('[data-import-group-select-source]')?.addEventListener('click', () => {
+      sourceGroup.items.forEach((item) => {
+        state.browserScanSelection[item.selectionKey] = true;
+      });
       renderBrowserImportModal();
     });
-    els.browserImportGroupsList.appendChild(row);
+    section.querySelector('[data-import-group-clear-source]')?.addEventListener('click', () => {
+      sourceGroup.items.forEach((item) => {
+        state.browserScanSelection[item.selectionKey] = false;
+      });
+      renderBrowserImportModal();
+    });
+
+    const list = section.querySelector('.browser-import-domain-list');
+    sourceGroup.items.forEach((group) => {
+      const row = document.createElement('label');
+      row.className = 'browser-import-group-row';
+      row.innerHTML = `
+        <input type="checkbox" class="browser-scan-checkbox" data-import-group="${escapeHtml(group.selectionKey)}"${state.browserScanSelection[group.selectionKey] ? ' checked' : ''} />
+        <div class="browser-import-group-main">
+          <strong>${escapeHtml(group.domain)}</strong>
+          <span>${escapeHtml(group.cookieCount)} 条 · ${group.authCount > 0 ? `${group.authCount} 条认证` : '无认证 Cookie'}</span>
+        </div>
+      `;
+      row.querySelector('[data-import-group]')?.addEventListener('change', (event) => {
+        state.browserScanSelection[group.selectionKey] = !!event.target.checked;
+        renderBrowserImportModal();
+      });
+      list.appendChild(row);
+    });
+    els.browserImportGroupsList.appendChild(section);
   });
 }
 
@@ -1006,14 +1271,27 @@ function closeAssetModal() {
   els.assetModal.classList.add('hidden');
 }
 
-function openBrowserCardModal() {
+function openBrowserCardModal(focusField = '') {
   state.browserCardModalOpen = true;
+  state.browserCardModalFocus = focusField;
   renderBrowserCardModal();
   els.browserCardModal.classList.remove('hidden');
+  requestAnimationFrame(() => {
+    const target = state.browserCardModalFocus === 'openUrl'
+      ? els.browserCardOpenUrlInput
+      : state.browserCardModalFocus === 'remark'
+        ? (els.browserCardUsernameInput || els.browserCardRemarkInput)
+        : null;
+    target?.focus();
+    if (target && 'select' in target) {
+      target.select?.();
+    }
+  });
 }
 
 function closeBrowserCardModal() {
   state.browserCardModalOpen = false;
+  state.browserCardModalFocus = '';
   els.browserCardModal.classList.add('hidden');
 }
 
@@ -1039,6 +1317,13 @@ function applySnapshot(payload) {
     state.browserScanRoot = state.settings.pythonCookieProjectPath;
   }
   state.statusText = payload.statusText || '后台监听中';
+  const cardIds = new Set(state.browserCards.map((item) => item.id));
+  state.browserCardSelection = Object.fromEntries(
+    Object.entries(state.browserCardSelection).filter(([id, value]) => value && cardIds.has(id))
+  );
+  state.browserCardCollapsed = Object.fromEntries(
+    Object.entries(state.browserCardCollapsed).filter(([key]) => state.browserCards.some((item) => item.sourceKey === key))
+  );
 
   if (!state.dateFilters.includes(state.selectedFilter)) {
     state.selectedFilter = state.dateFilters[0] || '全部';
@@ -1124,51 +1409,125 @@ async function scanBrowserCards(scope = 'all') {
 }
 
 async function loadBrowserImportSources() {
-  const projectPath = (els.browserScanRootInput?.value || '').trim();
+  const bitApiUrl = (els.browserImportBitApiUrlInput?.value || '').trim();
+  const bitApiToken = (els.browserImportBitApiTokenInput?.value || '').trim();
+  state.browserScanSummary = '正在加载来源列表...';
+  renderBrowserImportModal();
   const result = await window.click2save.getBrowserImportSources({
-    projectPath
+    bitApiUrl,
+    bitApiToken
   });
   if (!result || result.ok === false) {
     alert((result && result.message) || '获取来源失败');
     return;
   }
-  state.browserScanRoot = projectPath || state.browserScanRoot;
   state.browserImportSources = result.results || {
     chrome_profiles: [],
     self_built: [],
     bitbrowser: []
   };
+  state.browserImportSourceError = (result.results && result.results.bitbrowser_error) || '';
+  state.browserImportSourceSelection = {};
+  state.browserImportSourceIds = [];
+  resetBrowserImportSelection();
+  state.browserScanSummary = '来源扫描完成，请勾选来源后再加载 Cookie。';
   renderBrowserImportModal();
 }
 
-async function loadBrowserImportGroups() {
-  const sourceId = els.browserImportSourceSelect?.value || '';
-  if (!sourceId) {
-    alert('请先选择来源');
+async function saveBrowserImportBitConfig() {
+  const nextSettings = {
+    ...state.settings,
+    pythonCookieProjectPath: state.settings.pythonCookieProjectPath || '',
+    bitApiUrl: (els.browserImportBitApiUrlInput?.value || '').trim() || 'http://127.0.0.1:54345',
+    bitApiToken: (els.browserImportBitApiTokenInput?.value || '').trim()
+  };
+  const result = await window.click2save.saveSettings(nextSettings);
+  if (result && result.ok === false) {
+    alert(result.message || '保存失败');
     return;
   }
-  state.browserImportSourceId = sourceId;
+  state.settings = nextSettings;
+  state.browserScanSummary = '比特浏览器配置已保存';
+  renderBrowserImportModal();
+}
+
+async function batchDeleteBrowserCards() {
+  const ids = selectedBrowserCardIds();
+  if (!ids.length) {
+    alert('请先选择卡片');
+    return;
+  }
+  if (!window.confirm(`确认删除选中的 ${ids.length} 张卡片吗？`)) {
+    return;
+  }
+  const result = await window.click2save.deleteBrowserCards(ids);
+  if (result && result.ok === false) {
+    alert(result.message || '批量删除失败');
+    return;
+  }
+  state.browserCardSelection = {};
+  applySnapshot(await window.click2save.getInitialData());
+}
+
+async function batchTestBrowserCards() {
+  const ids = selectedBrowserCardIds();
+  if (!ids.length) {
+    alert('请先选择卡片');
+    return;
+  }
+  state.statusText = `正在测试 ${ids.length} 张浏览器卡片...`;
+  render();
+  const result = await window.click2save.checkBrowserCardConnectivity(ids);
+  if (result && result.ok === false) {
+    alert(result.message || '批量测试失败');
+    return;
+  }
+  applySnapshot(await window.click2save.getInitialData());
+}
+
+async function loadBrowserImportGroups() {
+  const selectedSources = selectedBrowserImportSources();
+  if (!selectedSources.length) {
+    alert('请先勾选至少一个来源');
+    return;
+  }
   state.browserScanSummary = '正在读取 Cookie...';
   renderBrowserImportModal();
-  const result = await window.click2save.loadBrowserImportGroups({
-    projectPath: (els.browserScanRootInput?.value || '').trim(),
-    sourceType: state.browserImportTab,
-    sourceId,
-    filterAuth: !!els.browserImportFilterAuth?.checked,
-    mergeDomain: !!els.browserImportMergeDomain?.checked
-  });
-  if (!result || result.ok === false) {
-    alert((result && result.message) || '读取 Cookie 失败');
-    return;
+
+  const loadedGroups = [];
+  const bitApiUrl = (els.browserImportBitApiUrlInput?.value || '').trim();
+  const bitApiToken = (els.browserImportBitApiTokenInput?.value || '').trim();
+
+  for (const source of selectedSources) {
+    const result = await window.click2save.loadBrowserImportGroups({
+      bitApiUrl,
+      bitApiToken,
+      sourceType: state.browserImportTab,
+      sourceId: source.id,
+      filterAuth: !!els.browserImportFilterAuth?.checked,
+      mergeDomain: !!els.browserImportMergeDomain?.checked
+    });
+    if (!result || result.ok === false) {
+      alert(`${source.label} 读取失败：${(result && result.message) || '读取 Cookie 失败'}`);
+      return;
+    }
+    loadedGroups.push(...(result.results || []).map((item) => ({
+      ...item,
+      sourceId: source.id,
+      sourceLabel: source.label,
+      sourceType: state.browserImportTab
+    })));
   }
+
   state.browserImportFilterAuth = !!els.browserImportFilterAuth?.checked;
   state.browserImportMergeDomain = !!els.browserImportMergeDomain?.checked;
-  state.browserImportGroups = (result.results || []).map((item) => ({
+  state.browserImportSourceIds = selectedSources.map((item) => item.id);
+  state.browserImportGroups = loadedGroups.map((item) => ({
     ...item,
-    selectionKey: `${state.browserImportTab}|${sourceId}|${item.domain}`
+    selectionKey: `${state.browserImportTab}|${item.sourceId}|${item.domain}`
   }));
   state.browserScanSelection = Object.fromEntries(state.browserImportGroups.map((item) => [item.selectionKey, false]));
-  state.browserScanSummary = `已加载 ${state.browserImportGroups.length} 个域`;
+  state.browserScanSummary = `已从 ${selectedSources.length} 个来源加载 ${state.browserImportGroups.length} 个域`;
   renderBrowserImportModal();
 }
 
@@ -1179,19 +1538,32 @@ async function importSelectedBrowserCards() {
     return;
   }
 
-  const built = await window.click2save.buildBrowserImportCards({
-    projectPath: (els.browserScanRootInput?.value || '').trim(),
-    sourceType: state.browserImportTab,
-    sourceId: state.browserImportSourceId,
-    groups: selectedGroups
+  const groupedBySource = new Map();
+  selectedGroups.forEach((group) => {
+    const key = `${group.sourceType}|${group.sourceId}`;
+    if (!groupedBySource.has(key)) {
+      groupedBySource.set(key, []);
+    }
+    groupedBySource.get(key).push(group);
   });
-  if (!built || built.ok === false) {
-    alert((built && built.message) || '导入构建失败');
-    return;
+
+  const cards = [];
+  for (const [key, groups] of groupedBySource.entries()) {
+    const [sourceType, sourceId] = key.split('|');
+    const built = await window.click2save.buildBrowserImportCards({
+      sourceType,
+      sourceId,
+      groups
+    });
+    if (!built || built.ok === false) {
+      alert((built && built.message) || '导入构建失败');
+      return;
+    }
+    cards.push(...(built.results || []));
   }
 
   const result = await window.click2save.importBrowserCards({
-    cards: built.results || []
+    cards
   });
   if (result && result.ok === false) {
     alert(result.message || '导入失败');
@@ -1199,8 +1571,7 @@ async function importSelectedBrowserCards() {
   }
 
   state.browserScanSummary = `已导入 ${selectedGroups.length} 张卡片`;
-  state.browserImportGroups = [];
-  state.browserScanSelection = {};
+  resetBrowserImportSelection();
   closeBrowserImportModal();
   applySnapshot(await window.click2save.getInitialData());
 }
@@ -1290,6 +1661,40 @@ els.browserCardSearchInput?.addEventListener('input', (event) => {
   render();
 });
 
+els.browserCardSelectAllBtn?.addEventListener('click', () => {
+  browserCardsForCurrentPage().forEach((item) => {
+    state.browserCardSelection[item.id] = true;
+  });
+  renderBrowserCardsList();
+});
+
+els.browserCardClearSelectionBtn?.addEventListener('click', () => {
+  state.browserCardSelection = {};
+  renderBrowserCardsList();
+});
+
+els.browserCardExpandAllBtn?.addEventListener('click', () => {
+  state.browserCardCollapsed = {};
+  renderBrowserCardsList();
+});
+
+els.browserCardCollapseAllBtn?.addEventListener('click', () => {
+  const next = {};
+  groupBrowserCardsBySource(browserCardsForCurrentPage()).forEach((group) => {
+    next[group.key] = true;
+  });
+  state.browserCardCollapsed = next;
+  renderBrowserCardsList();
+});
+
+els.browserCardBatchDeleteBtn?.addEventListener('click', async () => {
+  await batchDeleteBrowserCards();
+});
+
+els.browserCardBatchTestBtn?.addEventListener('click', async () => {
+  await batchTestBrowserCards();
+});
+
 els.scanAllBrowsersBtn?.addEventListener('click', async () => {
   await scanBrowserCards('all');
 });
@@ -1303,7 +1708,6 @@ els.scanSelfBuiltBtn?.addEventListener('click', async () => {
 });
 
 els.openBrowserImportModalBtn?.addEventListener('click', async () => {
-  await loadBrowserImportSources();
   openBrowserImportModal();
 });
 
@@ -1351,24 +1755,46 @@ els.closeBrowserImportModalBtn?.addEventListener('click', closeBrowserImportModa
 
 els.browserImportChromeTabBtn?.addEventListener('click', () => {
   state.browserImportTab = 'chrome_profile';
-  state.browserImportGroups = [];
+  resetBrowserImportSelection();
   renderBrowserImportModal();
 });
 
 els.browserImportSelfBuiltTabBtn?.addEventListener('click', () => {
   state.browserImportTab = 'self_built';
-  state.browserImportGroups = [];
+  resetBrowserImportSelection();
   renderBrowserImportModal();
 });
 
 els.browserImportBitTabBtn?.addEventListener('click', () => {
   state.browserImportTab = 'bitbrowser_api';
-  state.browserImportGroups = [];
+  resetBrowserImportSelection();
   renderBrowserImportModal();
 });
 
-els.browserImportSourceSelect?.addEventListener('change', (event) => {
-  state.browserImportSourceId = event.target.value || '';
+els.browserImportScanSourcesBtn?.addEventListener('click', async () => {
+  await loadBrowserImportSources();
+});
+
+els.browserImportSaveBitConfigBtn?.addEventListener('click', async () => {
+  await saveBrowserImportBitConfig();
+});
+
+els.browserImportSourceSelectAllBtn?.addEventListener('click', () => {
+  currentBrowserImportSources().forEach((item) => {
+    state.browserImportSourceSelection[item.id] = true;
+  });
+  state.browserImportSourceIds = currentBrowserImportSources().map((item) => item.id);
+  resetBrowserImportSelection();
+  renderBrowserImportModal();
+});
+
+els.browserImportSourceClearBtn?.addEventListener('click', () => {
+  currentBrowserImportSources().forEach((item) => {
+    state.browserImportSourceSelection[item.id] = false;
+  });
+  state.browserImportSourceIds = [];
+  resetBrowserImportSelection();
+  renderBrowserImportModal();
 });
 
 els.browserImportLoadBtn?.addEventListener('click', async () => {
@@ -1515,6 +1941,17 @@ els.browserCardOpenBtn?.addEventListener('click', async () => {
   }
 });
 
+els.browserCardInjectBtn?.addEventListener('click', async () => {
+  const card = selectedBrowserCard();
+  if (!card) return;
+  const result = await window.click2save.injectBrowserCard(card.id);
+  if (result && result.ok === false) {
+    alert(result.message || 'Cookie 转移失败');
+    return;
+  }
+  applySnapshot(await window.click2save.getInitialData());
+});
+
 els.browserCardOpenSourceBtn?.addEventListener('click', async () => {
   const card = selectedBrowserCard();
   if (!card) return;
@@ -1529,8 +1966,11 @@ els.browserCardSaveBtn?.addEventListener('click', async () => {
   if (!card) return;
   const result = await window.click2save.updateBrowserCard({
     id: card.id,
+    name: els.browserCardNameInput.value,
     remark: els.browserCardRemarkInput.value,
-    openUrl: els.browserCardOpenUrlInput.value
+    openUrl: els.browserCardOpenUrlInput.value,
+    username: els.browserCardUsernameInput.value,
+    password: els.browserCardPasswordInput.value
   });
   if (result && result.ok === false) {
     alert(result.message || '保存失败');

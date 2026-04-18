@@ -1,6 +1,8 @@
 const { execFileSync } = require('child_process');
 const { app, BrowserWindow, Tray, Menu, globalShortcut, clipboard, nativeImage, ipcMain, Notification, shell, screen, dialog } = require('electron');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const path = require('path');
 const { pathToFileURL } = require('url');
 const { StorageService } = require('./storage');
@@ -1018,6 +1020,17 @@ function getPythonBridgeConfig(projectPathOverride = '') {
   };
 }
 
+function getPythonBridgeConfigFromPayload(payload = {}) {
+  const settings = getSettings();
+  return {
+    projectPath: String(payload.projectPath || '').trim() || settings.pythonCookieProjectPath,
+    cfg: {
+      bit_api_url: String(payload.bitApiUrl || '').trim() || settings.bitApiUrl || 'http://127.0.0.1:54345',
+      bit_api_token: String(payload.bitApiToken || '').trim() || settings.bitApiToken || ''
+    }
+  };
+}
+
 function sendSnapshot(statusText) {
   if (!mainWindow || mainWindow.webContents.isDestroyed()) return;
   const records = storage.getAllRecords().map(normalizeRecord);
@@ -1031,6 +1044,53 @@ function sendSnapshot(statusText) {
     categoryFilters: storage.getCategoryFilters(),
     settings: getSettings(),
     statusText: statusText || defaultStatusText()
+  });
+}
+
+function requestUrlStatus(targetUrl) {
+  return new Promise((resolve) => {
+    let parsed;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      resolve({ ok: false, title: 'URL 无效' });
+      return;
+    }
+
+    const client = parsed.protocol === 'https:' ? https : http;
+    const req = client.request(parsed, {
+      method: 'GET',
+      timeout: 8000,
+      headers: {
+        'User-Agent': 'Click2Save/1.0',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+      }
+    }, (res) => {
+      const ok = Number(res.statusCode || 0) >= 200 && Number(res.statusCode || 0) < 400;
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        if (body.length < 32768) {
+          body += chunk;
+        }
+      });
+      res.on('end', () => {
+        const match = body.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+        const pageTitle = match ? match[1].replace(/\s+/g, ' ').trim() : '';
+        resolve({
+          ok,
+          title: pageTitle || `${res.statusCode || 0} ${res.statusMessage || ''}`.trim()
+        });
+      });
+    });
+
+    req.on('timeout', () => {
+      req.destroy(new Error('timeout'));
+    });
+    req.on('error', (error) => {
+      resolve({ ok: false, title: error && error.message ? error.message : '连接失败' });
+    });
+    req.end();
   });
 }
 
@@ -1822,13 +1882,20 @@ function setupIpc() {
   ipcMain.handle('get-browser-import-sources', async (_, payload = {}) => {
     try {
       const projectPath = String(payload.projectPath || '').trim();
-      if (projectPath && projectPath !== getSettings().pythonCookieProjectPath) {
+      const bitApiUrl = String(payload.bitApiUrl || '').trim();
+      const bitApiToken = String(payload.bitApiToken || '').trim();
+      const settings = getSettings();
+      if ((projectPath && projectPath !== settings.pythonCookieProjectPath)
+        || (bitApiUrl && bitApiUrl !== settings.bitApiUrl)
+        || (bitApiToken !== '' && bitApiToken !== settings.bitApiToken)) {
         storage.saveSettings({
-          ...getSettings(),
-          pythonCookieProjectPath: projectPath
+          ...settings,
+          pythonCookieProjectPath: projectPath || settings.pythonCookieProjectPath,
+          bitApiUrl: bitApiUrl || settings.bitApiUrl,
+          bitApiToken: bitApiToken !== '' ? bitApiToken : settings.bitApiToken
         });
       }
-      const result = await runPythonBridge('list-offline-sources', getPythonBridgeConfig(projectPath));
+      const result = await runPythonBridge('list-offline-sources', getPythonBridgeConfigFromPayload(payload));
       return {
         ok: true,
         results: result.results || {}
@@ -1844,14 +1911,21 @@ function setupIpc() {
   ipcMain.handle('load-browser-import-groups', async (_, payload = {}) => {
     try {
       const projectPath = String(payload.projectPath || '').trim();
-      if (projectPath && projectPath !== getSettings().pythonCookieProjectPath) {
+      const bitApiUrl = String(payload.bitApiUrl || '').trim();
+      const bitApiToken = String(payload.bitApiToken || '').trim();
+      const settings = getSettings();
+      if ((projectPath && projectPath !== settings.pythonCookieProjectPath)
+        || (bitApiUrl && bitApiUrl !== settings.bitApiUrl)
+        || (bitApiToken !== '' && bitApiToken !== settings.bitApiToken)) {
         storage.saveSettings({
-          ...getSettings(),
-          pythonCookieProjectPath: projectPath
+          ...settings,
+          pythonCookieProjectPath: projectPath || settings.pythonCookieProjectPath,
+          bitApiUrl: bitApiUrl || settings.bitApiUrl,
+          bitApiToken: bitApiToken !== '' ? bitApiToken : settings.bitApiToken
         });
       }
       const result = await runPythonBridge('load-offline-groups', {
-        ...getPythonBridgeConfig(projectPath),
+        ...getPythonBridgeConfigFromPayload(payload),
         sourceType: payload.sourceType || '',
         sourceId: payload.sourceId || '',
         filterAuth: payload.filterAuth !== false,
@@ -1905,8 +1979,11 @@ function setupIpc() {
 
   ipcMain.handle('update-browser-card', async (_, payload = {}) => {
     const result = storage.updateBrowserCard(payload.id, {
+      name: payload.name || '',
       remark: payload.remark || '',
-      openUrl: payload.openUrl || ''
+      openUrl: payload.openUrl || '',
+      username: payload.username || '',
+      password: payload.password || ''
     });
     sendSnapshot('浏览器卡片已保存');
     return { ok: !!result };
@@ -1943,6 +2020,32 @@ function setupIpc() {
     }
   });
 
+  ipcMain.handle('inject-browser-card', async (_, id) => {
+    try {
+      const card = storage.getAllBrowserCards().find((item) => item.id === id);
+      if (!card) {
+        return { ok: false, message: '浏览器卡片不存在' };
+      }
+      const result = await runPythonBridge('inject-open', {
+        ...getPythonBridgeConfig(),
+        cardJson: JSON.stringify(card)
+      });
+      if (result.ok) {
+        storage.updateBrowserCard(id, {
+          last_used_at: new Date().toLocaleString('zh-CN', { hour12: false }),
+          last_used_method: 'inject'
+        });
+        sendSnapshot('Cookie 转移完成');
+      }
+      return result;
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : 'Cookie 转移失败'
+      };
+    }
+  });
+
   ipcMain.handle('open-browser-card-source', async (_, id) => {
     const card = storage.getAllBrowserCards().find((item) => item.id === id);
     if (!card) return { ok: false, message: '浏览器卡片不存在' };
@@ -1956,6 +2059,46 @@ function setupIpc() {
     const ok = storage.deleteBrowserCard(id);
     sendSnapshot(ok ? '浏览器卡片已删除' : '删除失败');
     return { ok };
+  });
+
+  ipcMain.handle('delete-browser-cards', async (_, ids = []) => {
+    try {
+      const targets = Array.isArray(ids) ? ids : [];
+      let count = 0;
+      targets.forEach((id) => {
+        if (storage.deleteBrowserCard(id)) {
+          count += 1;
+        }
+      });
+      sendSnapshot(count ? `已删除 ${count} 张浏览器卡片` : '没有删除任何卡片');
+      return { ok: true, count };
+    } catch (error) {
+      return { ok: false, message: error && error.message ? error.message : '批量删除失败' };
+    }
+  });
+
+  ipcMain.handle('check-browser-card-connectivity', async (_, ids = []) => {
+    try {
+      const targets = Array.isArray(ids) ? ids : [];
+      const cards = storage.getAllBrowserCards();
+      const results = [];
+      for (const id of targets) {
+        const card = cards.find((item) => item.id === id);
+        if (!card) {
+          continue;
+        }
+        const result = await requestUrlStatus(card.openUrl || card.url || '');
+        storage.updateBrowserCard(id, {
+          test_ok: !!result.ok,
+          test_title: result.title || ''
+        }, { preserveUpdatedAt: true });
+        results.push({ id, ...result });
+      }
+      sendSnapshot(results.length ? `已完成 ${results.length} 张卡片连通性测试` : '没有可测试的卡片');
+      return { ok: true, results };
+    } catch (error) {
+      return { ok: false, message: error && error.message ? error.message : '批量测试失败' };
+    }
   });
 
   ipcMain.handle('update-asset-note', async (_, payload = {}) => {
