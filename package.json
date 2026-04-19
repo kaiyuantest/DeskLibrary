@@ -4,15 +4,15 @@
   "description": "DeskLibrary — 桌面收藏工作台，让碎片信息集中管理",
   "main": "src/main/index.js",
   "author": "DeskLibrary Team",
-  "license": "MIT",
+  "license": "GPL-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/yourusername/DeskLibrary.git"
+    "url": "https://github.com/kaiyuantest/DeskLibrary.git"
   },
   "bugs": {
-    "url": "https://github.com/yourusername/DeskLibrary/issues"
+    "url": "https://github.com/kaiyuantest/DeskLibrary/issues"
   },
-  "homepage": "https://github.com/yourusername/DeskLibrary#readme",
+  "homepage": "https://github.com/kaiyuantest/DeskLibrary#readme",
   "keywords": [
     "electron",
     "desktop",

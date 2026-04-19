@@ -6,7 +6,7 @@
 
 一款基于 Electron 的 Windows 桌面应用，帮助你快速收藏剪贴板内容、管理本地资源、导入浏览器会话。
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--2.0-blue.svg)](LICENSE)
 [![Electron](https://img.shields.io/badge/Electron-31-47848F.svg)](https://www.electronjs.org/)
 [![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg)](https://www.microsoft.com/windows)
 
@@ -185,7 +185,9 @@ C:\Users\<用户名>\AppData\Roaming\desklibrary-electron\data\
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+本项目采用 GPL-2.0 许可证 - 详见 [LICENSE](LICENSE) 文件
+
+**重要提示**：根据 GPL-2.0 协议，任何基于本项目的衍生作品也必须以 GPL-2.0 协议开源。
 
 ---
 
@@ -199,8 +201,8 @@ C:\Users\<用户名>\AppData\Roaming\desklibrary-electron\data\
 
 ## 📮 联系方式
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/DeskLibrary/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/DeskLibrary/discussions)
+- **Issues**: [GitHub Issues](https://github.com/kaiyuantest/DeskLibrary/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/kaiyuantest/DeskLibrary/discussions)
 
 ---
 
