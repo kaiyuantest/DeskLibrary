@@ -992,11 +992,17 @@ async function refreshCardCookies(card, cfg) {
   const source = card?.browserSource || card?.browser_source || {};
   const debugPort = Number(source?.port || source?.debugPort || 0);
   const preferredDomain = cardPreferredDomainForCdp(card);
-  const normalizedCookies = ensureArray(
+  const rawList = ensureArray(
     await loadSourceCookies(cfg, sourceType, sourceId, { debugPort, preferredDomain })
-  )
-    .map((item) => normalizeCookie(item))
-    .filter(Boolean);
+  );
+  const normalizedCookies = [];
+  for (const item of rawList) {
+    try {
+      normalizedCookies.push(normalizeCookie(item));
+    } catch {
+      /* 跳过单条异常，避免整批刷新失败 */
+    }
+  }
   const targetDomain = String(card?.domain || '').trim().toLowerCase();
   const matchedCookies = targetDomain
     ? normalizedCookies.filter((item) => {
@@ -1007,20 +1013,27 @@ async function refreshCardCookies(card, cfg) {
     })
     : normalizedCookies;
 
-  if (!matchedCookies.length) {
+  // 与老项目一致：先全量拉取；域名过滤仅作「优选子集」。过滤为空时仍保存全量，避免假阴性。
+  const finalCookies = matchedCookies.length ? matchedCookies : normalizedCookies;
+
+  if (!finalCookies.length) {
     return {
       ok: false,
-      message: `未从来源浏览器读取到 ${targetDomain || '当前域名'} 的最新 Cookie`
+      message: `未从来源浏览器读取到 Cookie（${targetDomain || '当前'}）`
     };
   }
 
-  const cookieNames = [...new Set(matchedCookies.map((item) => item.name).filter(Boolean))];
+  const usedFullFallback = targetDomain && !matchedCookies.length && normalizedCookies.length > 0;
+  const cookieNames = [...new Set(finalCookies.map((item) => item.name).filter(Boolean))];
+  const message = usedFullFallback
+    ? `已更新 ${finalCookies.length} 条 Cookie（域名「${targetDomain.replace(/^\.+/, '')}」未匹配到条目，已保存本次读取的全量）`
+    : `已更新 ${finalCookies.length} 条 Cookie${matchedCookies.length && matchedCookies.length < normalizedCookies.length ? `（域名命中 ${matchedCookies.length} 条）` : ''}`;
   return {
     ok: true,
-    cookies: matchedCookies,
+    cookies: finalCookies,
     cookieNames,
-    cookieCount: matchedCookies.length,
-    message: `已更新 ${matchedCookies.length} 条 Cookie`
+    cookieCount: finalCookies.length,
+    message
   };
 }
 
