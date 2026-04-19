@@ -835,6 +835,18 @@ async function loadSourceCookies(cfg, sourceType, sourceId) {
     return readCookiesFromDb(cookiePath, userDataDir);
   }
   if (sourceType === 'self_built') {
+    // 检查浏览器是否正在运行
+    const port = extractPortFromUserDataDir(sourceId);
+    if (port && await isPortOpen(port)) {
+      // 浏览器正在运行，使用 CDP 读取
+      try {
+        return await readCookiesViaCdp(port);
+      } catch (error) {
+        // CDP 读取失败，降级到数据库读取
+        console.warn('CDP 读取失败，降级到数据库读取:', error.message);
+      }
+    }
+    // 浏览器未运行或 CDP 失败，从数据库读取
     const cookiePath = getCookiePath(sourceId);
     if (!cookiePath) {
       throw new Error('找不到自建浏览器 Cookie 文件');
@@ -845,6 +857,12 @@ async function loadSourceCookies(cfg, sourceType, sourceId) {
     return bitGetCookies(cfg, sourceId);
   }
   throw new Error(`未知来源类型: ${sourceType}`);
+}
+
+function extractPortFromUserDataDir(userDataDir) {
+  // 从路径中提取端口号，例如 chrome_user_data_port_9222 -> 9222
+  const match = String(userDataDir || '').match(/port[_-](\d+)/i);
+  return match ? Number(match[1]) : 0;
 }
 
 function getCardSourceIdentity(card) {
