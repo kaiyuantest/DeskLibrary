@@ -151,14 +151,12 @@ const els = {
   newRecordDraft: document.getElementById('newRecordDraft'),
   createRecordBtn: document.getElementById('createRecordBtn'),
   autoJudgmentEnabled: document.getElementById('autoJudgmentEnabled'),
-  altQEnabled: document.getElementById('altQEnabled'),
   doubleCopyEnabled: document.getElementById('doubleCopyEnabled'),
   copyThenKeyEnabled: document.getElementById('copyThenKeyEnabled'),
   startupLaunchEnabled: document.getElementById('startupLaunchEnabled'),
   floatingIconEnabled: document.getElementById('floatingIconEnabled'),
   dockToEdgeEnabled: document.getElementById('dockToEdgeEnabled'),
   postCopyKey: document.getElementById('postCopyKey'),
-  altQShortcutInput: document.getElementById('altQShortcutInput'),
   deleteLastCaptureShortcutInput: document.getElementById('deleteLastCaptureShortcutInput'),
   accumulationStartShortcutInput: document.getElementById('accumulationStartShortcutInput'),
   accumulationFinishShortcutInput: document.getElementById('accumulationFinishShortcutInput'),
@@ -168,6 +166,9 @@ const els = {
   hotkeyFinishAccumEnabled: document.getElementById('hotkeyFinishAccumEnabled'),
   hotkeyUndoAccumEnabled: document.getElementById('hotkeyUndoAccumEnabled'),
   selfBuiltWorkspaceDirInput: document.getElementById('selfBuiltWorkspaceDirInput'),
+  selectSelfBuiltWorkspaceDirBtn: document.getElementById('selectSelfBuiltWorkspaceDirBtn'),
+  assetBackupPathInput: document.getElementById('assetBackupPathInput'),
+  selectAssetBackupPathBtn: document.getElementById('selectAssetBackupPathBtn'),
   saveSettingsBtn: document.getElementById('saveSettingsBtn'),
   settingsHelpModal: document.getElementById('settingsHelpModal'),
   settingsHelpModalOverlay: document.getElementById('settingsHelpModalOverlay'),
@@ -334,17 +335,18 @@ function commonRecords() {
     }));
 }
 
-function topDailyRecords(limit = 5) {
-  return [...dailyRecords()]
-    .sort((left, right) => Number(right.hitCount || 1) - Number(left.hitCount || 1))
-    .slice(0, limit);
-}
+// 已移除：今日高频和最近命中功能
+// function topDailyRecords(limit = 5) {
+//   return [...dailyRecords()]
+//     .sort((left, right) => Number(right.hitCount || 1) - Number(left.hitCount || 1))
+//     .slice(0, limit);
+// }
 
-function recentDailyRecords(limit = 5) {
-  return [...dailyRecords()]
-    .sort((left, right) => new Date(right.lastCapturedAt || right.updatedAt || right.createdAt) - new Date(left.lastCapturedAt || left.updatedAt || left.createdAt))
-    .slice(0, limit);
-}
+// function recentDailyRecords(limit = 5) {
+//   return [...dailyRecords()]
+//     .sort((left, right) => new Date(right.lastCapturedAt || right.updatedAt || right.createdAt) - new Date(left.lastCapturedAt || left.updatedAt || left.createdAt))
+//     .slice(0, limit);
+// }
 
 function recordsForCurrentPage() {
   if (state.currentPage === 'common') return commonRecords();
@@ -359,10 +361,38 @@ function assetsForCurrentPage() {
   if (state.assetTypeFilter !== '全部') {
     if (state.assetTypeFilter === '图片') {
       assets = assets.filter((item) => item.isImage);
-    } else if (state.assetTypeFilter === '文件') {
-      assets = assets.filter((item) => item.entryType === 'file');
     } else if (state.assetTypeFilter === '文件夹') {
       assets = assets.filter((item) => item.entryType === 'folder');
+    } else if (state.assetTypeFilter === '视频') {
+      assets = assets.filter((item) => {
+        const ext = (item.name || '').toLowerCase();
+        return ext.endsWith('.mp4') || ext.endsWith('.avi') || ext.endsWith('.mkv') || 
+               ext.endsWith('.mov') || ext.endsWith('.wmv') || ext.endsWith('.flv') || 
+               ext.endsWith('.webm') || ext.endsWith('.m4v');
+      });
+    } else if (state.assetTypeFilter === '压缩包') {
+      assets = assets.filter((item) => {
+        const ext = (item.name || '').toLowerCase();
+        return ext.endsWith('.zip') || ext.endsWith('.rar') || ext.endsWith('.7z') || 
+               ext.endsWith('.tar') || ext.endsWith('.gz') || ext.endsWith('.bz2');
+      });
+    } else if (state.assetTypeFilter === 'Excel') {
+      assets = assets.filter((item) => {
+        const ext = (item.name || '').toLowerCase();
+        return ext.endsWith('.xlsx') || ext.endsWith('.xls') || ext.endsWith('.csv');
+      });
+    } else if (state.assetTypeFilter === 'Word') {
+      assets = assets.filter((item) => {
+        const ext = (item.name || '').toLowerCase();
+        return ext.endsWith('.docx') || ext.endsWith('.doc');
+      });
+    } else if (state.assetTypeFilter === 'PDF') {
+      assets = assets.filter((item) => {
+        const ext = (item.name || '').toLowerCase();
+        return ext.endsWith('.pdf');
+      });
+    } else if (state.assetTypeFilter === '其他文件') {
+      assets = assets.filter((item) => item.entryType === 'file' && !item.isImage);
     }
   }
 
@@ -426,7 +456,6 @@ function render() {
   renderSearchTools();
   renderFilters();
   renderAssetFilters();
-  renderQuickSections();
   renderDailyRecords();
   renderCommonRecords();
   renderAssetList();
@@ -617,7 +646,7 @@ function renderPage() {
     els.aboutPage.classList.toggle('hidden', current !== 'about');
   }
   if (els.topbarControlDeck) {
-    els.topbarControlDeck.classList.toggle('hidden', current === 'settings' || current === 'about');
+    els.topbarControlDeck.classList.toggle('hidden', current === 'settings' || current === 'about' || current === 'browserCards' || current === 'assets');
   }
   els.dailyFilterBar.classList.toggle('hidden', current !== 'daily');
   els.dailyPageBtn.classList.toggle('active', current === 'daily');
@@ -664,10 +693,22 @@ function renderFilters() {
 function renderAssetFilters() {
   if (!els.assetTypeFilterBar) return;
   els.assetTypeFilterBar.innerHTML = '';
-  ['全部', '文件', '文件夹', '图片'].forEach((label) => {
+  const filterTypes = [
+    { label: '全部', icon: '📦' },
+    { label: '文件夹', icon: '📁' },
+    { label: '图片', icon: '🖼️' },
+    { label: '视频', icon: '🎬' },
+    { label: '压缩包', icon: '📦' },
+    { label: 'Excel', icon: '📊' },
+    { label: 'Word', icon: '📝' },
+    { label: 'PDF', icon: '📄' },
+    { label: '其他文件', icon: '📄' }
+  ];
+  
+  filterTypes.forEach(({ label, icon }) => {
     const button = document.createElement('button');
     button.className = `filter-chip ${state.assetTypeFilter === label ? 'active' : ''}`;
-    button.textContent = label;
+    button.innerHTML = `<span class="filter-chip-icon">${icon}</span><span>${label}</span>`;
     button.onclick = () => {
       state.assetTypeFilter = label;
       ensureValidAssetSelection();
@@ -703,25 +744,61 @@ function buildRecordCard(record) {
 }
 
 function buildAssetCard(asset) {
+  const isBackup = asset.mode === 'backup';
   const thumb = asset.previewUrl
-    ? `<div class="thumb-wrap asset-thumb-wrap"><img src="${asset.previewUrl}" alt="${escapeHtml(asset.name)}" /></div>`
-    : '<div class="asset-icon-placeholder">资源</div>';
+    ? `<div class="assets-card-preview"><img src="${asset.previewUrl}" alt="${escapeHtml(asset.name)}" /></div>`
+    : `<div class="assets-card-preview-placeholder">
+        <span class="assets-card-preview-icon">${asset.isImage ? '🖼️' : asset.entryType === 'folder' ? '📁' : '📄'}</span>
+      </div>`;
+
+  // 备份存储显示 4 个按钮（原始 + 备份），快捷存储显示 2 个按钮
+  const buttons = isBackup
+    ? `
+      <button class="assets-card-btn" data-asset-open="${asset.id}" title="打开原始文件">
+        <span>📄</span>
+        <span>原始</span>
+      </button>
+      <button class="assets-card-btn" data-asset-location="${asset.id}" title="打开原始文件所在位置">
+        <span>📂</span>
+        <span>原始位置</span>
+      </button>
+      <button class="assets-card-btn" data-asset-open-backup="${asset.id}" title="打开备份文件">
+        <span>💾</span>
+        <span>备份</span>
+      </button>
+      <button class="assets-card-btn" data-asset-backup-location="${asset.id}" title="打开备份文件所在位置">
+        <span>🗂️</span>
+        <span>备份位置</span>
+      </button>
+    `
+    : `
+      <button class="assets-card-btn" data-asset-open="${asset.id}" title="打开资源">
+        <span>📂</span>
+        <span>打开</span>
+      </button>
+      <button class="assets-card-btn" data-asset-location="${asset.id}" title="打开所在位置">
+        <span>📍</span>
+        <span>位置</span>
+      </button>
+    `;
 
   return `
-    <div class="record-card-actions">
-      <div class="record-topline">${escapeHtml(asset.modeDisplay)} · ${escapeHtml(asset.entryTypeDisplay)}</div>
-      <div class="asset-card-actions">
-        <button class="card-copy-btn card-location-btn" data-asset-id="${asset.id}" title="打开所在位置">⌂</button>
-        <button class="card-copy-btn card-open-btn" data-asset-id="${asset.id}" title="打开资源">↗</button>
-      </div>
+    <div class="assets-card-header">
+      <div class="assets-card-type-badge ${isBackup ? 'backup' : 'link'}">${isBackup ? '备份' : '快捷'}</div>
     </div>
-    <div class="record-title">${escapeHtml(asset.name)}</div>
-    <div class="record-source">${escapeHtml(asset.sourcePathDisplay)}</div>
+    <div class="assets-card-title">${escapeHtml(asset.name)}</div>
+    <div class="assets-card-meta">
+      <span class="assets-card-meta-item">${escapeHtml(asset.entryTypeDisplay)}</span>
+      ${asset.isImage ? '<span class="assets-card-meta-item">图片</span>' : ''}
+    </div>
     ${thumb}
-    <div class="record-preview">${escapeHtml(asset.note || asset.sourcePathDisplay || '')}</div>
-    <div class="record-footer">
-      <span>${escapeHtml(asset.statusDisplay)}</span>
-      <span>${escapeHtml(asset.updatedAtDisplay)}</span>
+    ${asset.note ? `<div class="assets-card-note">${escapeHtml(asset.note)}</div>` : ''}
+    <div class="assets-card-actions-row">
+      ${buttons}
+    </div>
+    <div class="assets-card-footer">
+      <span class="assets-card-status">${escapeHtml(asset.statusDisplay)}</span>
+      <span class="assets-card-time">${escapeHtml(asset.updatedAtDisplay)}</span>
     </div>
   `;
 }
@@ -837,39 +914,39 @@ function renderRecordList(container, records) {
   });
 }
 
-function renderQuickList(container, records, emptyText) {
-  container.innerHTML = '';
+// 已移除：今日高频和最近命中功能
+// function renderQuickList(container, records, emptyText) {
+//   container.innerHTML = '';
+//   if (!records.length) {
+//     const empty = document.createElement('div');
+//     empty.className = 'quick-empty';
+//     empty.textContent = emptyText;
+//     container.appendChild(empty);
+//     return;
+//   }
+//   records.forEach((record) => {
+//     const button = document.createElement('button');
+//     button.className = `quick-item ${record.id === state.selectedRecordId ? 'active' : ''}`;
+//     button.innerHTML = `
+//       <div class="quick-item-title">${escapeHtml(record.displayTitle)}</div>
+//       <div class="quick-item-meta">
+//         <span>命中 ${escapeHtml(record.hitCount)}</span>
+//         <span>${escapeHtml(record.lastCapturedAtDisplay)}</span>
+//       </div>
+//     `;
+//     button.onclick = () => {
+//       state.selectedRecordId = record.id;
+//       openModal();
+//     };
+//     container.appendChild(button);
+//   });
+// }
 
-  if (!records.length) {
-    const empty = document.createElement('div');
-    empty.className = 'quick-empty';
-    empty.textContent = emptyText;
-    container.appendChild(empty);
-    return;
-  }
-
-  records.forEach((record) => {
-    const button = document.createElement('button');
-    button.className = `quick-item ${record.id === state.selectedRecordId ? 'active' : ''}`;
-    button.innerHTML = `
-      <div class="quick-item-title">${escapeHtml(record.displayTitle)}</div>
-      <div class="quick-item-meta">
-        <span>命中 ${escapeHtml(record.hitCount)}</span>
-        <span>${escapeHtml(record.lastCapturedAtDisplay)}</span>
-      </div>
-    `;
-    button.onclick = () => {
-      state.selectedRecordId = record.id;
-      openModal();
-    };
-    container.appendChild(button);
-  });
-}
-
-function renderQuickSections() {
-  renderQuickList(els.topDailyList, topDailyRecords(), '今天还没有高频内容');
-  renderQuickList(els.recentDailyList, recentDailyRecords(), '今天还没有最近命中内容');
-}
+// 已移除：今日高频和最近命中功能
+// function renderQuickSections() {
+//   renderQuickList(els.topDailyList, topDailyRecords(), '今天还没有高频内容');
+//   renderQuickList(els.recentDailyList, recentDailyRecords(), '今天还没有最近命中内容');
+// }
 
 function renderDailyRecords() {
   const records = dailyRecords();
@@ -909,26 +986,35 @@ function renderCommonRecords() {
 function renderAssetList() {
   if (!els.assetsList) return;
   const assets = assetsForCurrentPage();
-  els.assetsCount.textContent = `${assets.length} 条`;
+  els.assetsCount.textContent = `${assets.length}`;
   els.assetsList.innerHTML = '';
 
   if (!assets.length) {
     const empty = document.createElement('div');
-    empty.className = 'quick-empty';
-    empty.textContent = '还没有资源，拖入文件或文件夹开始收集。';
+    empty.className = 'assets-empty-state';
+    empty.innerHTML = `
+      <div class="assets-empty-icon">📦</div>
+      <div class="assets-empty-text">还没有资源</div>
+      <div class="assets-empty-hint">拖入文件或文件夹开始收集</div>
+    `;
     els.assetsList.appendChild(empty);
     return;
   }
 
   assets.forEach((asset) => {
     const item = document.createElement('article');
-    item.className = `record-item ${asset.id === state.selectedAssetId ? 'active' : ''}`;
+    item.className = `assets-card ${asset.id === state.selectedAssetId ? 'active' : ''}`;
     item.tabIndex = 0;
     item.innerHTML = buildAssetCard(asset);
-    item.onclick = () => {
+    
+    // 点击卡片打开详情
+    item.onclick = (e) => {
+      // 如果点击的是按钮，不触发卡片点击
+      if (e.target.closest('.assets-card-btn')) return;
       state.selectedAssetId = asset.id;
       openAssetModal();
     };
+    
     item.onkeydown = (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
@@ -936,7 +1022,9 @@ function renderAssetList() {
         openAssetModal();
       }
     };
-    const openButton = item.querySelector('.card-open-btn');
+
+    // 打开资源
+    const openButton = item.querySelector('[data-asset-open]');
     openButton?.addEventListener('click', async (event) => {
       event.stopPropagation();
       const result = await window.deskLibrary.openAssetPrimary(asset.id);
@@ -944,7 +1032,9 @@ function renderAssetList() {
         alert(result.message || '打开失败');
       }
     });
-    const locationButton = item.querySelector('.card-location-btn');
+
+    // 打开所在位置
+    const locationButton = item.querySelector('[data-asset-location]');
     locationButton?.addEventListener('click', async (event) => {
       event.stopPropagation();
       const result = await window.deskLibrary.openAssetLocation(asset.id);
@@ -952,6 +1042,27 @@ function renderAssetList() {
         alert(result.message || '打开失败');
       }
     });
+
+    // 打开备份资源（仅备份模式）
+    const openBackupButton = item.querySelector('[data-asset-open-backup]');
+    openBackupButton?.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const result = await window.deskLibrary.openAssetStored(asset.id);
+      if (result && result.ok === false) {
+        alert(result.message || '打开备份失败');
+      }
+    });
+
+    // 打开备份所在位置（仅备份模式）
+    const backupLocationButton = item.querySelector('[data-asset-backup-location]');
+    backupLocationButton?.addEventListener('click', async (event) => {
+      event.stopPropagation();
+      const result = await window.deskLibrary.openAssetStoredLocation(asset.id);
+      if (result && result.ok === false) {
+        alert(result.message || '打开备份位置失败');
+      }
+    });
+
     els.assetsList.appendChild(item);
   });
 }
@@ -1431,13 +1542,22 @@ function renderModal() {
 const SETTINGS_HELP = {
   autoJudgment: {
     title: '复制后智能判断（文本）',
-    subline: '无单独全局快捷键',
-    body: '剪贴板内容变化后，会进入短时间观察期。若未通过「复制后再按修饰键」等方式提前结束，则在约 1.5 秒后对纯文本做规则判断：是否包含换行、链接、较长正文或常见工作类关键词等。命中则自动保存为一条收藏；未命中则不会保存。图片等内容不会套用此自动规则。'
-  },
-  altQ: {
-    title: '立即收藏剪贴板（全局）',
-    subline: '快捷键可改，须符合系统可注册组合',
-    body: '在任意时刻按下所设全局快捷键，可立即将当前剪贴板中的文本或图片保存为一条收藏，跳过观察窗口。适合已经复制完毕、希望马上归档的场景。需打开右侧开关后生效。保存后重新注册热键。'
+    subline: '根据内容特征自动分类',
+    body: `智能判断会在复制文本后自动分析内容特征，决定是否收藏以及如何处理。
+
+判断规则：
+1. 长度过短（少于 2 个字符）→ 不收藏
+2. 纯空白字符 → 不收藏
+3. 单个字符或符号 → 不收藏
+4. 常见系统路径（如 C:\\Windows）→ 不收藏
+5. 重复内容（与上次相同）→ 不收藏
+6. 包含换行、链接、较长正文或工作关键词 → 自动收藏
+
+建议：
+• 默认关闭，避免收藏过多无用内容
+• 如需精确控制，使用全局快捷键或双击复制
+• 开启后会自动过滤大部分无意义内容
+• 图片等非文本内容不受此规则影响`
   },
   doubleCopy: {
     title: '观察窗口内连按两次复制',
@@ -1496,15 +1616,11 @@ function closeSettingsHelpModal() {
 function renderSettings() {
   const s = state.settings || {};
   els.autoJudgmentEnabled.checked = !!s.autoJudgmentEnabled;
-  els.altQEnabled.checked = !!s.altQEnabled;
   els.doubleCopyEnabled.checked = !!s.doubleCopyEnabled;
   els.copyThenKeyEnabled.checked = !!s.copyThenKeyEnabled;
   els.startupLaunchEnabled.checked = !!s.startupLaunchEnabled;
   els.floatingIconEnabled.checked = !!s.floatingIconEnabled;
   els.dockToEdgeEnabled.checked = s.dockToEdgeEnabled !== false;
-  if (els.altQShortcutInput) {
-    els.altQShortcutInput.value = s.altQShortcut || 'Alt+Q';
-  }
   els.postCopyKey.value = s.postCopyKey || 'Shift';
   if (els.deleteLastCaptureShortcutInput) {
     els.deleteLastCaptureShortcutInput.value = s.deleteLastCaptureShortcut != null
@@ -1542,6 +1658,9 @@ function renderSettings() {
       || s.browserScanRoot
       || '';
     els.selfBuiltWorkspaceDirInput.value = normalizeWindowsPathDisplay(raw);
+  }
+  if (els.assetBackupPathInput) {
+    els.assetBackupPathInput.value = normalizeWindowsPathDisplay(s.assetBackupPath || '');
   }
 }
 
@@ -1811,16 +1930,15 @@ function applySnapshot(payload) {
 
 function collectSettings() {
   const selfBuiltWorkspaceDir = normalizeWindowsPathDisplay((els.selfBuiltWorkspaceDirInput?.value || '').trim());
+  const assetBackupPath = normalizeWindowsPathDisplay((els.assetBackupPathInput?.value || '').trim());
   return {
     autoJudgmentEnabled: els.autoJudgmentEnabled.checked,
-    altQEnabled: els.altQEnabled.checked,
     doubleCopyEnabled: els.doubleCopyEnabled.checked,
     copyThenKeyEnabled: els.copyThenKeyEnabled.checked,
     startupLaunchEnabled: els.startupLaunchEnabled.checked,
     floatingIconEnabled: els.floatingIconEnabled.checked,
     dockToEdgeEnabled: els.dockToEdgeEnabled.checked,
     postCopyKey: els.postCopyKey.value.trim() || 'Shift',
-    altQShortcut: (els.altQShortcutInput?.value || '').trim() || 'Alt+Q',
     deleteLastCaptureShortcut: (els.deleteLastCaptureShortcutInput?.value || '').trim(),
     accumulationStartShortcut: (els.accumulationStartShortcutInput?.value || '').trim(),
     accumulationFinishShortcut: (els.accumulationFinishShortcutInput?.value || '').trim(),
@@ -1833,7 +1951,8 @@ function collectSettings() {
     browserScanRoot: selfBuiltWorkspaceDir,
     selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
     selfBuiltChromePath: selfBuiltWorkspaceDir ? `${selfBuiltWorkspaceDir}\\chrome.exe` : '',
-    selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? `${selfBuiltWorkspaceDir}\\chromedriver.exe` : ''
+    selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? `${selfBuiltWorkspaceDir}\\chromedriver.exe` : '',
+    assetBackupPath
   };
 }
 
@@ -2511,6 +2630,20 @@ els.saveSettingsBtn.addEventListener('click', async () => {
   };
   state.browserScanRoot = nextSettings.selfBuiltWorkspaceDir || state.browserScanRoot;
   renderSettings();
+});
+
+els.selectSelfBuiltWorkspaceDirBtn?.addEventListener('click', async () => {
+  const result = await window.deskLibrary.selectFolder();
+  if (result && !result.canceled && result.path) {
+    els.selfBuiltWorkspaceDirInput.value = result.path;
+  }
+});
+
+els.selectAssetBackupPathBtn?.addEventListener('click', async () => {
+  const result = await window.deskLibrary.selectFolder();
+  if (result && !result.canceled && result.path) {
+    els.assetBackupPathInput.value = result.path;
+  }
 });
 
 els.settingsPage?.addEventListener('click', (event) => {

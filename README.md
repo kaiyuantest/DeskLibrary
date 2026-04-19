@@ -1,88 +1,213 @@
-# DeskLibrary（桌面收藏工作台）
+# DeskLibrary
 
-DeskLibrary 是一个基于 Electron 的 Windows 桌面收藏与工作台应用，用来把剪贴板里的文本、图片和本地资源快速沉淀为可搜索、可复用的资料库，并集成浏览器会话与资源管理。
+<div align="center">
 
-## 当前功能
+**桌面收藏工作台 - 让碎片信息集中管理**
 
-- 自动监听剪贴板，保存文本和图片内容
-- 支持手动新增文本记录
-- 支持 `Alt+Q` 快速采集当前剪贴板
-- 支持“双击复制”与“复制后按键”两种采集触发方式
-- 支持“累计复制”，把连续复制的片段合并保存
-- 支持将记录加入“常用”，并按命中次数和最近使用排序
-- 支持记录搜索、日期筛选、分页、详情查看和备注编辑
-- 支持图片预览、打开原图路径、复制记录内容、删除记录
-- 支持资源管理：
-  - `备份库`：导入文件或文件夹并复制一份到应用数据目录
-  - `快捷入口`：仅保存原始路径，作为本地文件/文件夹入口
-- 支持资源拖拽导入、文件选择导入、备注编辑、打开资源、打开原位置、打开所在目录、删除资源
-- 支持托盘驻留、系统通知、开机启动、悬浮图标、靠边停靠
-- 支持悬浮快捷菜单，用于快速收藏、加入常用、累计复制、删除最近一次收藏等操作
+一款基于 Electron 的 Windows 桌面应用，帮助你快速收藏剪贴板内容、管理本地资源、导入浏览器会话。
 
-## 技术栈
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Electron](https://img.shields.io/badge/Electron-31-47848F.svg)](https://www.electronjs.org/)
+[![Platform](https://img.shields.io/badge/platform-Windows-0078D6.svg)](https://www.microsoft.com/windows)
 
-- Electron 31
-- 原生 JavaScript
-- `uiohook-napi` 用于全局键盘监听
-- 本地 JSON 文件存储
+</div>
 
-## 项目结构
+---
 
-- `src/main`：主进程逻辑、全局快捷键、托盘、悬浮窗、IPC、存储
-- `src/renderer`：主界面、悬浮窗界面、样式和交互逻辑
-- `src/img`：界面使用的静态图片资源
-- `src/main/bin`：Windows 辅助二进制工具
-- `data`：本地开发时的示例/测试数据目录，已忽略提交
+## 📸 应用截图
 
-## 用户数据
+### 每日内容 - 剪贴板收藏
+![每日内容](1.png)
 
-运行时数据保存在 Electron 的 `userData` 目录下，业务数据主要位于：
+### 常用内容 - 高频访问
+![常用内容](2.png)
 
-- `data/records.json`：文本/图片收藏记录
-- `data/images/`：采集到的图片文件
-- `data/assets.json`：资源库索引
-- `data/assets-backups/`：备份模式导入的文件和文件夹副本
-- `data/settings.json`：用户设置
-- `data/duplicate-notices.json`：重复提醒状态
+### 资源库 - 文件管理
+![资源库](3.png)
 
-Windows 打包应用通常位于：
+### 浏览器卡片 - Cookie 管理
+![浏览器卡片](4.png)
 
-```text
-C:\Users\<用户名>\AppData\Roaming\DeskLibrary\data
-```
+### 设置中心 - 个性化配置
+![设置中心](5.png)
 
-## 开发
+---
 
-安装依赖：
+## ✨ 核心功能
 
+### 📋 剪贴板收藏
+- **自动监听** - 实时监听剪贴板变化，智能判断是否收藏
+- **多种触发方式** - 支持连按两次复制、复制后按修饰键等多种收藏方式
+- **累计复制** - 连续复制的片段自动合并为一条记录
+- **智能分类** - 自动识别文本、图片、链接等内容类型
+- **全文搜索** - 快速搜索历史记录，支持关键词、日期筛选
+- **常用标记** - 将重要内容标记为常用，按命中次数排序
+
+### 📦 资源库
+- **备份存储** - 导入文件/文件夹并自动备份到指定目录
+- **快捷入口** - 保存文件路径作为快速访问入口
+- **类型筛选** - 支持按文件类型筛选（图片、视频、文档等）
+- **拖拽导入** - 直接拖入文件即可完成导入
+- **备注管理** - 为每个资源添加说明和关键词
+- **快速打开** - 一键打开文件或所在目录
+
+### 🌐 浏览器卡片
+- **Cookie 导入** - 从 Chrome、自建浏览器、比特浏览器导入 Cookie
+- **在线刷新** - 支持远程浏览器 Cookie 在线刷新
+- **批量管理** - 批量测试、删除、导出浏览器卡片
+- **分组展示** - 按来源自动分组，便于管理
+- **快速注入** - 一键将 Cookie 注入到目标浏览器
+
+### ⚙️ 系统功能
+- **悬浮图标** - 桌面悬浮球，快速访问常用功能
+- **靠边停靠** - 主窗口和悬浮窗支持靠边自动隐藏
+- **全局快捷键** - 自定义快捷键，随时随地快速操作
+- **开机启动** - 支持开机自动启动，后台驻留
+- **托盘驻留** - 最小化到系统托盘，不占用任务栏
+
+---
+
+## 🚀 快速开始
+
+### 环境要求
+- Windows 10/11
+- Node.js 16+
+- npm 或 yarn
+
+### 安装依赖
 ```bash
 npm install
 ```
 
-启动开发版：
-
+### 开发运行
 ```bash
 npm run dev
 ```
 
-## 构建
-
-构建安装包：
-
+### 构建应用
 ```bash
+# 构建安装包
 npm run dist
-```
 
-仅输出解包目录：
-
-```bash
+# 仅输出解包目录
 npm run pack
 ```
 
-构建产物输出到 `release/`。
+构建产物输出到 `release/` 目录。
 
-## 当前状态
+---
 
-- 当前实现面向 Windows 桌面环境
-- 存储层采用 JSON 文件，便于调试和迁移
-- 仓库默认忽略本地运行数据、构建产物、日志和敏感文件
+## 📁 项目结构
+
+```
+DeskLibrary/
+├── src/
+│   ├── main/              # 主进程
+│   │   ├── index.js       # 主进程入口
+│   │   ├── preload.js     # 预加载脚本
+│   │   ├── storage.js     # 数据存储
+│   │   ├── browser-import.js  # 浏览器导入
+│   │   └── bin/           # 辅助工具
+│   ├── renderer/          # 渲染进程
+│   │   ├── index.html     # 主界面
+│   │   ├── renderer.js    # 主界面逻辑
+│   │   ├── styles.css     # 样式
+│   │   ├── floating.html  # 悬浮窗
+│   │   └── floating.js    # 悬浮窗逻辑
+│   └── img/               # 图片资源
+├── package.json
+└── README.md
+```
+
+---
+
+## 💾 数据存储
+
+应用数据保存在 Electron 的 `userData` 目录：
+
+**Windows 路径**：
+```
+C:\Users\<用户名>\AppData\Roaming\desklibrary-electron\data\
+```
+
+**数据文件**：
+- `records.json` - 剪贴板收藏记录
+- `assets.json` - 资源库索引
+- `browserCards.json` - 浏览器卡片
+- `settings.json` - 用户设置
+- `images/` - 图片文件
+- `assets-backups/` - 备份文件
+
+---
+
+## 🛠️ 技术栈
+
+- **框架**: Electron 31
+- **UI**: 原生 JavaScript + CSS
+- **全局监听**: uiohook-napi
+- **数据存储**: JSON 文件
+- **构建工具**: electron-builder
+
+---
+
+## ⚙️ 配置说明
+
+### 快捷键设置
+- **删除上次收藏**: `Ctrl+Alt+Z`
+- **开始累计**: `Ctrl+Alt+A`
+- **结束累计**: `Ctrl+Alt+S`
+- 所有快捷键均可在设置中自定义
+
+### 行为设置
+- **复制后智能判断** - 自动判断是否收藏文本内容
+- **连按两次复制** - 在观察窗口内连续复制两次自动收藏
+- **复制后按修饰键** - 复制后按 Shift/Ctrl/Alt 立即收藏
+- **靠边停靠** - 主窗口和悬浮窗靠边自动隐藏
+
+### 路径配置
+- **自建浏览器工作目录** - 自建浏览器的安装路径
+- **资源备份存储路径** - 备份文件的保存位置
+
+---
+
+## 🤝 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+### 开发流程
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 提交 Pull Request
+
+---
+
+## 📄 许可证
+
+本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
+
+---
+
+## 🙏 致谢
+
+- [Electron](https://www.electronjs.org/) - 跨平台桌面应用框架
+- [uiohook-napi](https://github.com/SnosMe/uiohook-napi) - 全局键盘监听
+- [electron-builder](https://www.electron.build/) - 应用打包工具
+
+---
+
+## 📮 联系方式
+
+- **Issues**: [GitHub Issues](https://github.com/yourusername/DeskLibrary/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yourusername/DeskLibrary/discussions)
+
+---
+
+<div align="center">
+
+**如果这个项目对你有帮助，请给一个 ⭐️ Star 支持一下！**
+
+Made with ❤️ by DeskLibrary Team
+
+</div>

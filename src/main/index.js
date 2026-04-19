@@ -50,7 +50,6 @@ let pendingPayload = null;
 let observing = false;
 let observeTimer = null;
 let observeContext = null;
-let altQFlowActive = false;
 let suppressedPollingSignature = '';
 let suppressedPollingUntil = 0;
 let lastShortcutSourceContext = null;
@@ -1488,7 +1487,6 @@ function startObserving(payload, source = 'clipboard_poll', sourceContext = null
 }
 
 function handleClipboardChanged(payload, source = 'clipboard_poll', sourceContext = null) {
-  if (altQFlowActive) return;
   const settings = getSettings();
 
   if (accumulationSession && accumulationSession.active) {
@@ -1627,25 +1625,6 @@ function registerGlobalAccelerator(accelerator, handler) {
 function refreshGlobalShortcuts() {
   unregisterTrackedGlobalShortcuts();
   const settings = getSettings();
-
-  const altQAcc = String(settings.altQShortcut || 'Alt+Q').trim() || 'Alt+Q';
-  if (settings.altQEnabled) {
-    registerGlobalAccelerator(altQAcc, () => {
-      const s = getSettings();
-      if (!s.altQEnabled) return;
-      altQFlowActive = true;
-      ignoreNextClipboardChange = true;
-      const sourceContext = getForegroundWindowContext();
-      const payload = readClipboardPayload();
-      const label = String(s.altQShortcut || 'Alt+Q').trim() || 'Alt+Q';
-      if (payload) {
-        processPayload(payload, 'hotkey_alt_q', `${label} 已收藏`, { sourceContext });
-      }
-      setTimeout(() => {
-        altQFlowActive = false;
-      }, 100);
-    });
-  }
 
   const del = String(settings.deleteLastCaptureShortcut || '').trim();
   if (settings.hotkeyDeleteLastEnabled !== false && del) {
@@ -1846,6 +1825,10 @@ function setupIpc() {
         || settings?.browserScanRoot
         || ''
       ).trim();
+      
+      // 调试日志
+      console.log('[save-settings] Received assetBackupPath:', settings?.assetBackupPath);
+      
       const saved = storage.saveSettings({
         ...getSettings(),
         ...settings,
@@ -1855,6 +1838,10 @@ function setupIpc() {
         selfBuiltChromePath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chrome.exe') : '',
         selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chromedriver.exe') : ''
       });
+      
+      // 调试日志
+      console.log('[save-settings] Saved assetBackupPath:', saved?.assetBackupPath);
+      
       applySystemSettings(saved);
       sendSnapshot('设置已保存');
       return { ok: true };
@@ -1941,6 +1928,16 @@ function setupIpc() {
     return {
       canceled: result.canceled,
       paths: result.filePaths || []
+    };
+  });
+
+  ipcMain.handle('select-folder', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openDirectory']
+    });
+    return {
+      canceled: result.canceled,
+      path: result.filePaths && result.filePaths[0] ? result.filePaths[0] : ''
     };
   });
 
@@ -2477,8 +2474,22 @@ function setupIpc() {
 
   ipcMain.handle('open-asset-location', async (_, id) => {
     const asset = storage.getAllAssets().find((item) => item.id === id);
-    if (!asset) return { ok: false, message: '资源不存在' };
-    shell.showItemInFolder(asset.primaryPath || asset.sourcePath);
+    if (!asset || !asset.sourcePath) return { ok: false, message: '资源不存在' };
+    shell.showItemInFolder(asset.sourcePath);
+    return { ok: true };
+  });
+
+  ipcMain.handle('open-asset-stored', async (_, id) => {
+    const asset = storage.getAllAssets().find((item) => item.id === id);
+    if (!asset || !asset.storedPath) return { ok: false, message: '备份文件不存在' };
+    const errorMessage = await shell.openPath(asset.storedPath);
+    return { ok: !errorMessage, message: errorMessage || '' };
+  });
+
+  ipcMain.handle('open-asset-stored-location', async (_, id) => {
+    const asset = storage.getAllAssets().find((item) => item.id === id);
+    if (!asset || !asset.storedPath) return { ok: false, message: '备份文件不存在' };
+    shell.showItemInFolder(asset.storedPath);
     return { ok: true };
   });
 

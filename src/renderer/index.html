@@ -137,94 +137,81 @@
             </section>
 
             <section id="commonPage" class="page-view page-scroll hidden">
-              <div class="other-grid">
-                <section class="panel minimalist-panel">
-                  <div class="section-head">
-                    <span>常用</span>
-                    <span id="commonCount" class="count-chip">0</span>
-                  </div>
-                  <section id="commonRecordsList" class="cards-grid compact-grid"></section>
-                </section>
-
-                <section class="panel minimalist-panel">
-                  <div class="section-head">
-                    <span>今日高频</span>
-                  </div>
-                  <div id="topDailyList" class="quick-list"></div>
-                </section>
-
-                <section class="panel minimalist-panel">
-                  <div class="section-head">
-                    <span>最近命中</span>
-                  </div>
-                  <div id="recentDailyList" class="quick-list"></div>
-                </section>
-              </div>
+              <section class="panel minimalist-panel">
+                <div class="section-head">
+                  <span>常用</span>
+                  <span id="commonCount" class="count-chip">0</span>
+                </div>
+                <section id="commonRecordsList" class="cards-grid compact-grid"></section>
+              </section>
             </section>
 
             <section id="assetsPage" class="page-view page-scroll hidden">
-              <section class="panel minimalist-panel asset-intake-panel">
-                <div class="asset-hero">
-                  <div class="asset-hero-copy">
+              <section class="assets-hero-section">
+                <div class="assets-hero-header">
+                  <div class="assets-hero-left">
                     <div class="eyebrow asset-eyebrow">Asset Vault</div>
                     <div class="section-head asset-head">
                       <span id="assetsPageHeading">资源库</span>
                       <span id="assetsCount" class="count-chip">0</span>
                     </div>
-                    <p class="asset-hero-text">把需要长期保留的文件与临时快捷入口放在同一个工作区里，统一搜索、统一打开、统一管理。</p>
+                    <p class="asset-hero-text">统一管理备份文件和快捷入口，长期保存或快速访问。</p>
                   </div>
-
-                  <div class="asset-hero-tools">
-                    <label class="control-card search-card asset-search-card">
-                      <span class="control-label">搜索资源</span>
-                      <input id="assetSearchInput" class="search-input" type="text" placeholder="搜索文件名 / 路径 / 备注" />
+                  <div class="assets-hero-right">
+                    <label class="assets-search-box">
+                      <span class="assets-search-icon">🔍</span>
+                      <input id="assetSearchInput" class="assets-search-input" type="text" placeholder="搜索文件名、路径或备注..." />
                     </label>
+                  </div>
+                </div>
 
-                    <div class="asset-filter-panel">
-                      <div class="control-label">资源类型</div>
-                      <div id="assetTypeFilterBar" class="filter-bar asset-type-filter"></div>
+                <div class="assets-filter-row">
+                  <div class="assets-filter-label">资源类型</div>
+                  <div id="assetTypeFilterBar" class="assets-filter-chips"></div>
+                </div>
+
+                <div class="assets-dropzone-grid">
+                  <div id="assetBackupDropZone" class="assets-dropzone assets-dropzone-backup" data-mode="backup" tabindex="0">
+                    <div class="assets-dropzone-icon">📦</div>
+                    <div class="assets-dropzone-content">
+                      <strong>备份存储</strong>
+                      <span>拖入文件或文件夹，复制到软件目录永久保存</span>
+                    </div>
+                  </div>
+                  <div id="assetLinkDropZone" class="assets-dropzone assets-dropzone-link" data-mode="link" tabindex="0">
+                    <div class="assets-dropzone-icon">🔗</div>
+                    <div class="assets-dropzone-content">
+                      <strong>快捷存储</strong>
+                      <span>拖入文件或文件夹，仅保存路径快速访问</span>
                     </div>
                   </div>
                 </div>
-
-                <div class="asset-toolbar">
-                  <div id="assetBackupDropZone" class="asset-dropzone asset-dropzone-backup" data-mode="backup" tabindex="0">
-                    <div class="asset-dropzone-kicker">备份存储</div>
-                    <strong>拖入文件或文件夹</strong>
-                    <span>导入后复制一份到软件目录，适合长期留存与脱离原路径保存。</span>
-                  </div>
-                  <div id="assetLinkDropZone" class="asset-dropzone asset-dropzone-link" data-mode="link" tabindex="0">
-                    <div class="asset-dropzone-kicker">快捷存储</div>
-                    <strong>拖入文件或文件夹</strong>
-                    <span>仅保存原始路径，适合常用目录、项目文件和临时入口。</span>
-                  </div>
-                </div>
               </section>
 
-              <section id="assetsList" class="cards-grid"></section>
+              <section id="assetsList" class="assets-card-grid"></section>
             </section>
 
             <section id="browserCardsPage" class="page-view page-scroll hidden">
-              <section class="panel minimalist-panel asset-intake-panel browser-import-panel">
-                <div class="section-head">
-                  <span>浏览器 Cookie 卡片</span>
-                  <span id="browserCardCount" class="count-chip">0</span>
-                </div>
-
-                <div class="browser-import-toolbar">
-                  <div class="browser-action-row">
-                    <button id="openBrowserImportModalBtn" class="save-pill" type="button">离线导入</button>
+              <section class="browser-cards-hero">
+                <div class="browser-cards-hero-left">
+                  <div class="section-head browser-cards-main-head">
+                    <span>浏览器 Cookie 卡片</span>
+                    <span id="browserCardCount" class="count-chip">0</span>
                   </div>
+                  <p class="browser-cards-desc">管理和导入浏览器 Cookie，实现多账号快速切换和登录状态保存。</p>
                 </div>
-
-                <div id="browserScanSummary" class="minor-text">导入方式改为弹窗扫描选择，当前这里仅显示状态。</div>
+                <div class="browser-cards-hero-right">
+                  <button id="openBrowserImportModalBtn" class="browser-import-hero-btn" type="button">
+                    <span class="browser-import-hero-icon">⊕</span>
+                    <div class="browser-import-hero-text">
+                      <strong>离线导入</strong>
+                      <span>从本地浏览器导入 Cookie</span>
+                    </div>
+                  </button>
+                </div>
               </section>
 
-              <section class="section-head compact">
-                <span>已导入浏览器卡片</span>
-              </section>
-
-              <label class="control-card search-card asset-search-card browser-card-search">
+              <label class="control-card search-card browser-card-search-inline">
                 <span class="control-label">搜索卡片</span>
                 <input id="browserCardSearchInput" class="search-input" type="text" placeholder="搜索域名 / 备注 / 来源" />
               </label>
@@ -258,18 +245,10 @@
                   <div class="setting-row setting-row-rich">
                     <div class="setting-row-main">
                       <span class="setting-label-text">复制后智能判断（文本）</span>
-                      <button type="button" class="setting-help-btn" data-help-key="autoJudgment" title="查看说明">!</button>
-                      <span class="setting-shortcut-readonly">无全局快捷键</span>
+                      <button type="button" class="setting-help-btn" data-help-key="autoJudgment" title="查看说明">?</button>
+                      <span class="setting-shortcut-readonly">默认不打开</span>
                     </div>
                     <label class="setting-checkbox-wrap"><input id="autoJudgmentEnabled" type="checkbox" /></label>
-                  </div>
-                  <div class="setting-row setting-row-rich">
-                    <div class="setting-row-main">
-                      <span class="setting-label-text">立即收藏剪贴板（全局）</span>
-                      <button type="button" class="setting-help-btn" data-help-key="altQ" title="查看说明">!</button>
-                      <input id="altQShortcutInput" class="setting-shortcut-input" type="text" spellcheck="false" autocomplete="off" placeholder="Alt+Q" />
-                    </div>
-                    <label class="setting-checkbox-wrap"><input id="altQEnabled" type="checkbox" /></label>
                   </div>
                   <div class="setting-row setting-row-rich">
                     <div class="setting-row-main">
@@ -324,12 +303,25 @@
                   <label class="setting-row"><span>靠边显示</span><input id="dockToEdgeEnabled" type="checkbox" /></label>
                 </div>
 
+                <div class="settings-subhead">路径配置</div>
+                
                 <div class="settings-key-row">
                   <span>自建浏览器工作目录</span>
-                  <input id="selfBuiltWorkspaceDirInput" type="text" placeholder="例如 E:\zjllq\data" />
+                  <div class="setting-path-input-group">
+                    <input id="selfBuiltWorkspaceDirInput" type="text" placeholder="例如 E:\zjllq\data" />
+                    <button id="selectSelfBuiltWorkspaceDirBtn" class="text-action compact" type="button">选择</button>
+                  </div>
                 </div>
 
-                <p class="settings-hint">保存后重新注册全局快捷键；若与系统或其它软件冲突可能无法注册。开机启动通常需下次登录系统后验证。</p>
+                <div class="settings-key-row">
+                  <span>资源备份存储路径</span>
+                  <div class="setting-path-input-group">
+                    <input id="assetBackupPathInput" type="text" placeholder="留空则使用默认路径（软件目录下的 data/assets-backups 文件夹）" />
+                    <button id="selectAssetBackupPathBtn" class="text-action compact" type="button">选择</button>
+                  </div>
+                </div>
+
+                <p class="settings-hint">保存后重新注册全局快捷键；若与系统或其它软件冲突可能无法注册。开机启动通常需下次登录系统后验证。备份路径修改后，新导入的资源将保存到新路径。</p>
                 <button id="saveSettingsBtn" class="save-pill">保存设置</button>
               </section>
             </section>
@@ -349,7 +341,7 @@
                   源码托管于 GitHub，欢迎查阅与提交 Issue。
                   <button type="button" class="text-action inline-link" id="aboutOpenSourceBtn">打开仓库</button>
                 </p>
-                <div class="about-code-block" id="aboutRepoUrl">https://github.com/kaiyuantest/click2save-electron</div>
+                <div class="about-code-block" id="aboutRepoUrl">https://github.com/yourusername/DeskLibrary</div>
 
                 <div class="about-subhead">联系与赞赏</div>
                 <div class="about-qr-grid">
@@ -622,18 +614,30 @@
     <div id="browserImportModal" class="modal hidden">
       <div id="browserImportModalOverlay" class="modal-overlay"></div>
       <section class="modal-card browser-import-modal-card">
-        <div class="modal-head">
-          <div>
-            <div class="modal-title">离线导入 Cookie</div>
-            <div id="browserImportStatus" class="modal-subline">请选择来源并加载 Cookie</div>
+        <div class="modal-head browser-import-modal-head">
+          <div class="browser-import-modal-title-wrap">
+            <div class="browser-import-modal-icon">⊕</div>
+            <div>
+              <div class="modal-title">离线导入 Cookie</div>
+              <div id="browserImportStatus" class="modal-subline">选择浏览器来源，扫描并导入 Cookie 卡片</div>
+            </div>
           </div>
           <button id="closeBrowserImportModalBtn" class="icon-action" title="关闭">×</button>
         </div>
 
         <div class="browser-import-tabs">
-          <button id="browserImportChromeTabBtn" class="filter-chip active" type="button">系统 Chrome</button>
-          <button id="browserImportSelfBuiltTabBtn" class="filter-chip" type="button">自建浏览器</button>
-          <button id="browserImportBitTabBtn" class="filter-chip" type="button">比特浏览器</button>
+          <button id="browserImportChromeTabBtn" class="browser-import-tab active" type="button">
+            <span class="browser-import-tab-icon">🌐</span>
+            <span>系统 Chrome</span>
+          </button>
+          <button id="browserImportSelfBuiltTabBtn" class="browser-import-tab" type="button">
+            <span class="browser-import-tab-icon">🔧</span>
+            <span>自建浏览器</span>
+          </button>
+          <button id="browserImportBitTabBtn" class="browser-import-tab" type="button">
+            <span class="browser-import-tab-icon">🎯</span>
+            <span>比特浏览器</span>
+          </button>
         </div>
 
         <div class="modal-body">
@@ -666,13 +670,16 @@
 
             <section class="browser-import-source-panel">
               <div class="browser-import-panel-head">
-                <div class="section-head compact">
-                  <span>来源列表</span>
-                  <span id="browserImportSourceCount" class="count-chip">0</span>
+                <div class="browser-import-section-title">
+                  <span class="browser-import-step-badge">1</span>
+                  <div>
+                    <strong>选择来源</strong>
+                    <span id="browserImportSourceCount" class="browser-import-count-text">0 个来源</span>
+                  </div>
                 </div>
                 <div class="browser-import-actions-row compact">
-                  <button id="browserImportSourceSelectAllBtn" class="text-action" type="button">来源全选</button>
-                  <button id="browserImportSourceClearBtn" class="text-action" type="button">清空来源</button>
+                  <button id="browserImportSourceSelectAllBtn" class="browser-import-mini-btn" type="button">全选</button>
+                  <button id="browserImportSourceClearBtn" class="browser-import-mini-btn" type="button">清空</button>
                 </div>
               </div>
               <section id="browserImportSourcesList" class="browser-import-sources-list"></section>
@@ -680,22 +687,36 @@
 
             <section class="browser-import-groups-panel">
               <div class="browser-import-panel-head">
-                <div class="section-head compact">
-                  <span>域名列表</span>
-                  <span id="browserImportSelectedCount" class="count-chip">0</span>
+                <div class="browser-import-section-title">
+                  <span class="browser-import-step-badge">2</span>
+                  <div>
+                    <strong>选择域名</strong>
+                    <span id="browserImportSelectedCount" class="browser-import-count-text">0 个域名</span>
+                  </div>
                 </div>
                 <div class="browser-import-actions-row compact">
-                  <button id="browserImportLoadBtn" class="save-pill compact" type="button">加载 Cookie</button>
-                  <button id="browserImportSelectAllBtn" class="text-action" type="button">全选</button>
-                  <button id="browserImportClearBtn" class="text-action" type="button">清空</button>
-                  <button id="browserImportConfirmBtn" class="text-action" type="button">导入选中</button>
+                  <button id="browserImportLoadBtn" class="browser-import-primary-btn" type="button">加载 Cookie</button>
+                  <button id="browserImportSelectAllBtn" class="browser-import-mini-btn" type="button">全选</button>
+                  <button id="browserImportClearBtn" class="browser-import-mini-btn" type="button">清空</button>
                 </div>
               </div>
               <div class="browser-import-options">
-                <label class="setting-row"><span>仅认证 Cookie</span><input id="browserImportFilterAuth" type="checkbox" /></label>
-                <label class="setting-row"><span>按根域名合并</span><input id="browserImportMergeDomain" type="checkbox" /></label>
+                <label class="browser-import-option-row">
+                  <input id="browserImportFilterAuth" type="checkbox" />
+                  <span>仅认证 Cookie</span>
+                </label>
+                <label class="browser-import-option-row">
+                  <input id="browserImportMergeDomain" type="checkbox" />
+                  <span>按根域名合并</span>
+                </label>
               </div>
               <section id="browserImportGroupsList" class="browser-import-groups-list"></section>
+              <div class="browser-import-final-actions">
+                <button id="browserImportConfirmBtn" class="browser-import-confirm-btn" type="button">
+                  <span>✓</span>
+                  <span>确认导入选中的域名</span>
+                </button>
+              </div>
             </section>
           </div>
         </div>

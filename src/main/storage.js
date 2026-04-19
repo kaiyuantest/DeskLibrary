@@ -21,7 +21,7 @@ class StorageService {
     this.baseDir = baseDir;
     this.dataDir = path.join(baseDir, 'data');
     this.imagesDir = path.join(this.dataDir, 'images');
-    this.assetsDir = path.join(this.dataDir, 'assets-backups');
+    this.defaultAssetsDir = path.join(this.dataDir, 'assets-backups');
     this.recordsFile = path.join(this.dataDir, 'records.json');
     this.assetsFile = path.join(this.dataDir, 'assets.json');
     this.browserCardsFile = path.join(this.dataDir, 'browserCards.json');
@@ -29,18 +29,16 @@ class StorageService {
     this.duplicateFile = path.join(this.dataDir, 'duplicate-notices.json');
 
     fs.mkdirSync(this.imagesDir, { recursive: true });
-    fs.mkdirSync(this.assetsDir, { recursive: true });
+    fs.mkdirSync(this.defaultAssetsDir, { recursive: true });
 
     this.ensureFile(this.recordsFile, []);
     this.ensureFile(this.assetsFile, []);
     this.ensureFile(this.browserCardsFile, []);
     this.ensureFile(this.settingsFile, {
       autoJudgmentEnabled: true,
-      altQEnabled: true,
       doubleCopyEnabled: true,
       copyThenKeyEnabled: true,
       postCopyKey: 'Shift',
-      altQShortcut: 'Alt+Q',
       hotkeyDeleteLastEnabled: true,
       hotkeyStartAccumEnabled: true,
       hotkeyFinishAccumEnabled: true,
@@ -63,7 +61,8 @@ class StorageService {
       selfBuiltChromedriverPath: '',
       pythonCookieProjectPath: DEFAULT_PYTHON_COOKIE_PROJECT,
       bitApiUrl: 'http://127.0.0.1:54345',
-      bitApiToken: ''
+      bitApiToken: '',
+      assetBackupPath: ''
     });
     this.ensureFile(this.duplicateFile, {});
   }
@@ -208,11 +207,9 @@ class StorageService {
 
     return {
       autoJudgmentEnabled: true,
-      altQEnabled: true,
       doubleCopyEnabled: true,
       copyThenKeyEnabled: true,
       postCopyKey: 'Shift',
-      altQShortcut: 'Alt+Q',
       hotkeyDeleteLastEnabled: true,
       hotkeyStartAccumEnabled: true,
       hotkeyFinishAccumEnabled: true,
@@ -236,6 +233,7 @@ class StorageService {
       pythonCookieProjectPath: DEFAULT_PYTHON_COOKIE_PROJECT,
       bitApiUrl: 'http://127.0.0.1:54345',
       bitApiToken: '',
+      assetBackupPath: '',
       ...raw,
       selfBuiltWorkspaceDir,
       browserScanRoot: selfBuiltWorkspaceDir,
@@ -497,7 +495,11 @@ class StorageService {
 
     if (target.mode === 'backup' && target.storedPath) {
       const resolved = path.resolve(target.storedPath);
-      const root = path.resolve(this.assetsDir);
+      const settings = this.getSettings();
+      const assetsDir = settings.assetBackupPath && settings.assetBackupPath.trim() 
+        ? settings.assetBackupPath.trim() 
+        : this.defaultAssetsDir;
+      const root = path.resolve(assetsDir);
       if (resolved.startsWith(root)) {
         this.removePathSafe(resolved);
       }
@@ -537,7 +539,20 @@ class StorageService {
   }
 
   copyPathToBackup(sourcePath, name) {
-    const targetPath = path.join(this.assetsDir, `${crypto.randomUUID()}-${this.sanitizeName(name || 'resource')}`);
+    const settings = this.getSettings();
+    const assetsDir = settings.assetBackupPath && settings.assetBackupPath.trim() 
+      ? settings.assetBackupPath.trim() 
+      : this.defaultAssetsDir;
+    
+    // 调试日志
+    console.log('[copyPathToBackup] settings.assetBackupPath:', settings.assetBackupPath);
+    console.log('[copyPathToBackup] assetsDir:', assetsDir);
+    console.log('[copyPathToBackup] defaultAssetsDir:', this.defaultAssetsDir);
+    
+    // 确保备份目录存在
+    fs.mkdirSync(assetsDir, { recursive: true });
+    
+    const targetPath = path.join(assetsDir, `${crypto.randomUUID()}-${this.sanitizeName(name || 'resource')}`);
     this.copyPathRecursive(sourcePath, targetPath);
     return targetPath;
   }

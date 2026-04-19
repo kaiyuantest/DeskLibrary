@@ -1,10 +1,27 @@
 {
   "name": "desklibrary-electron",
   "version": "1.0.0",
-  "description": "DeskLibrary — desktop collection workbench (Electron)",
+  "description": "DeskLibrary — 桌面收藏工作台，让碎片信息集中管理",
   "main": "src/main/index.js",
-  "author": "OpenAI Codex",
-  "license": "UNLICENSED",
+  "author": "DeskLibrary Team",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/DeskLibrary.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yourusername/DeskLibrary/issues"
+  },
+  "homepage": "https://github.com/yourusername/DeskLibrary#readme",
+  "keywords": [
+    "electron",
+    "desktop",
+    "clipboard",
+    "collection",
+    "resource-manager",
+    "browser-cookie",
+    "windows"
+  ],
   "scripts": {
     "start": "electron .",
     "dev": "electron .",
@@ -24,7 +41,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "icon": "src/img/icon.ico"
     }
   },
   "dependencies": {
