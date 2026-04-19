@@ -1212,23 +1212,25 @@ async function runCdpScript(payload) {
     "  $script:msgId=0",
     "  [void](Send-Cdp 'Network.enable' @{})",
     "  [void](Send-Cdp 'Page.enable' @{})",
-    "  $domains=New-Object System.Collections.Generic.HashSet[string]",
+    "  $getAllResp=Send-Cdp 'Network.getAllCookies' @{}",
+    "  $existingCookies=@()",
+    "  if($getAllResp.result -and $getAllResp.result.cookies){ $existingCookies=@($getAllResp.result.cookies) }",
     "  foreach($cookie in $cookies){",
-    "    if($cookie.domain){ [void]$domains.Add([string]$cookie.domain) }",
-    "  }",
-    "  foreach($domain in $domains){",
-    "    $getAllResp=Send-Cdp 'Network.getAllCookies' @{}",
-    "    if($getAllResp.result -and $getAllResp.result.cookies){",
-    "      foreach($existingCookie in $getAllResp.result.cookies){",
-    "        $existingDomain=[string]$existingCookie.domain",
-    "        if($existingDomain -eq $domain -or $existingDomain -eq ('.' + $domain.TrimStart('.')) -or ('.' + $existingDomain.TrimStart('.')) -eq $domain){",
-    "          $deleteParams=@{",
-    "            name=[string]$existingCookie.name;",
-    "            domain=$existingDomain",
-    "          }",
-    "          if($existingCookie.path){ $deleteParams.path=[string]$existingCookie.path }",
-    "          [void](Send-Cdp 'Network.deleteCookies' $deleteParams)",
-    "        }",
+    "    $targetDomain=[string]$cookie.domain",
+    "    $targetName=[string]$cookie.name",
+    "    $targetPath=if($cookie.path){ [string]$cookie.path } else { '/' }",
+    "    foreach($existing in $existingCookies){",
+    "      $existingDomain=[string]$existing.domain",
+    "      $existingName=[string]$existing.name",
+    "      $existingPath=if($existing.path){ [string]$existing.path } else { '/' }",
+    "      $domainMatch=$false",
+    "      if($existingDomain -eq $targetDomain){ $domainMatch=$true }",
+    "      elseif($existingDomain -eq ('.' + $targetDomain.TrimStart('.'))){ $domainMatch=$true }",
+    "      elseif(('.' + $existingDomain.TrimStart('.')) -eq $targetDomain){ $domainMatch=$true }",
+    "      if($domainMatch -and $existingName -eq $targetName -and $existingPath -eq $targetPath){",
+    "        $deleteParams=@{ name=$existingName; domain=$existingDomain }",
+    "        if($existingPath){ $deleteParams.path=$existingPath }",
+    "        [void](Send-Cdp 'Network.deleteCookies' $deleteParams)",
     "      }",
     "    }",
     "  }",
@@ -1328,24 +1330,6 @@ async function dbWriteCookies(cookieDbPath, cookies, userDataDir) {
   try {
     fs.copyFileSync(cookieDbPath, tempDb);
     const statements = ['BEGIN TRANSACTION;'];
-    
-    // 收集所有需要清理的域名
-    const domainsToClean = new Set();
-    for (const cookie of normalized) {
-      domainsToClean.add(cookie.domain);
-      // 也添加带点和不带点的变体
-      const trimmed = cookie.domain.replace(/^\.+/, '');
-      if (trimmed) {
-        domainsToClean.add(trimmed);
-        domainsToClean.add(`.${trimmed}`);
-      }
-    }
-    
-    // 先删除这些域名下的所有旧 Cookie
-    for (const domain of domainsToClean) {
-      statements.push(`DELETE FROM cookies WHERE host_key='${escapeSqlText(domain)}';`);
-    }
-    
     let count = 0;
     for (const cookie of normalized) {
       const encryptedValue = encryptCookieValue(masterKey, cookie.value);
@@ -1370,7 +1354,18 @@ async function dbWriteCookies(cookieDbPath, cookies, userDataDir) {
         top_frame_site_key: `'${escapeSqlText(cookie.topFrameSiteKey || '')}'`,
         has_cross_site_ancestor: cookie.hasCrossSiteAncestor ? '1' : '0'
       };
-      // 不再需要逐个删除，因为已经在前面批量删除了整个域名的 Cookie
+      // 只删除我们要替换的这个具体的 Cookie（精确匹配 domain + name + path）
+      const domainVariants = [cookie.domain];
+      const trimmed = cookie.domain.replace(/^\.+/, '');
+      if (trimmed && trimmed !== cookie.domain) {
+        domainVariants.push(trimmed);
+        domainVariants.push(`.${trimmed}`);
+      }
+      for (const domainVariant of domainVariants) {
+        statements.push(
+          `DELETE FROM cookies WHERE host_key='${escapeSqlText(domainVariant)}' AND name='${escapeSqlText(cookie.name)}' AND path='${escapeSqlText(cookie.path || '/')}';`
+        );
+      }
       const insertColumns = Object.keys(valuesMap).filter((key) => columns.has(key));
       const insertValues = insertColumns.map((key) => valuesMap[key]);
       statements.push(`INSERT INTO cookies (${insertColumns.join(',')}) VALUES (${insertValues.join(',')});`);
