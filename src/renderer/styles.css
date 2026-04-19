@@ -893,6 +893,13 @@ input[type="checkbox"]:checked::before {
   padding: 0;
 }
 
+.browser-card-tools .browser-card-rewrite {
+  font-weight: 800;
+  color: #b45309;
+  border-color: rgba(251, 191, 36, 0.65);
+  background: rgba(254, 243, 199, 0.95);
+}
+
 .browser-card-titlebox {
   display: grid;
   gap: 2px;
@@ -1484,6 +1491,23 @@ input[type="checkbox"]:checked::before {
 
 .browser-inject-actions {
   margin-top: 10px;
+}
+
+.browser-online-import-modal-body {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.browser-online-import-field {
+  margin-top: 4px;
+}
+
+.browser-online-import-hint {
+  margin-top: 6px;
+  line-height: 1.45;
+}
+
+#browserOnlineImportTargetSelect {
+  width: 100%;
 }
 
 .browser-inject-modal-body {

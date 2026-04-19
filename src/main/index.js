@@ -2100,6 +2100,47 @@ function setupIpc() {
     }
   });
 
+  ipcMain.handle('list-online-import-targets', async () => {
+    try {
+      const result = await runPythonBridge('online-import-list-targets', getPythonBridgeConfig());
+      return {
+        ok: result.ok !== false,
+        results: Array.isArray(result.results) ? result.results : [],
+        message: result.message || ''
+      };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '获取在线导入目标失败'
+      };
+    }
+  });
+
+  ipcMain.handle('run-online-import', async (_, payload = {}) => {
+    try {
+      const result = await runPythonBridge('online-import-capture', {
+        ...getPythonBridgeConfig(),
+        target: payload.target || null,
+        accountName: String(payload.accountName || '').trim(),
+        inheritBrowserSource: payload.inheritBrowserSource || null
+      });
+      if (!result.ok) {
+        return result;
+      }
+      const cards = Array.isArray(result.cards) ? result.cards : [];
+      if (!cards.length) {
+        return { ok: false, message: '没有可导入的卡片' };
+      }
+      const imported = storage.importBrowserCards(cards);
+      sendSnapshot(imported.length ? (result.message || `在线导入 ${imported.length} 张卡片`) : '没有可导入的新卡片');
+      return { ok: true, count: imported.length, message: result.message || '' };
+    } catch (error) {
+      const message = error && error.message ? error.message : '在线导入失败';
+      sendSnapshot(message);
+      return { ok: false, message };
+    }
+  });
+
   ipcMain.handle('update-browser-card', async (_, payload = {}) => {
     const result = storage.updateBrowserCard(payload.id, {
       name: payload.name || '',
@@ -2139,6 +2180,38 @@ function setupIpc() {
       return {
         ok: false,
         message: error && error.message ? error.message : '更新 Cookie 失败'
+      };
+    }
+  });
+
+  ipcMain.handle('rewrite-browser-card-cookies', async (_, id) => {
+    try {
+      const card = storage.getAllBrowserCards().find((item) => item.id === id);
+      if (!card) {
+        return { ok: false, message: '浏览器卡片不存在' };
+      }
+      const result = await runPythonBridge('rewrite-card-cookies', {
+        ...getPythonBridgeConfig(),
+        cardJson: JSON.stringify(card)
+      });
+      const rewriteDebug = result && result.rewriteDebug !== undefined ? result.rewriteDebug : null;
+      if (!result.ok) {
+        return { ok: false, message: result.message || '重写失败', rewriteDebug };
+      }
+      const updated = storage.updateBrowserCard(id, {
+        cookies: Array.isArray(result.cookies) ? result.cookies : [],
+        cookieNames: Array.isArray(result.cookieNames) ? result.cookieNames : [],
+        cookieCount: Number(result.cookieCount || 0)
+      });
+      if (!updated) {
+        return { ok: false, message: '卡片更新失败', rewriteDebug };
+      }
+      sendSnapshot(result.message || 'Cookie 已重写');
+      return { ok: true, message: result.message || 'Cookie 已重写', rewriteDebug };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '重写 Cookie 失败'
       };
     }
   });

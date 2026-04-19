@@ -133,9 +133,14 @@ class StorageService {
       browserId: rawBrowserSource.browserId || rawBrowserSource.browser_id || '',
       label: rawBrowserSource.label || '',
       name: rawBrowserSource.name || '',
-      port: rawBrowserSource.port !== undefined && rawBrowserSource.port !== null
-        ? Number(rawBrowserSource.port)
-        : 0
+      port: (() => {
+        const raw = rawBrowserSource.port ?? rawBrowserSource.debugPort ?? rawBrowserSource.debug_port;
+        if (raw === undefined || raw === null || raw === '') {
+          return 0;
+        }
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : 0;
+      })()
     };
     const sourceLabel = browserSource.label
       || browserSource.displayName

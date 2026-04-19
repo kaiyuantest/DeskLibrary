@@ -49,7 +49,12 @@ const state = {
   browserCardModalFocus: '',
   mobileDateToolsOpen: false,
   mobileFilterToolsOpen: false,
-  assetDropActive: false
+  assetDropActive: false,
+  browserOnlineImportModalOpen: false,
+  browserOnlineImportTargets: [],
+  browserOnlineImportSelectedKey: '',
+  browserOnlineImportGroupRef: null,
+  browserOnlineImportStatus: ''
 };
 
 const els = {
@@ -112,6 +117,14 @@ const els = {
   browserCardBatchTestBtn: document.getElementById('browserCardBatchTestBtn'),
   browserCardBatchDeleteBtn: document.getElementById('browserCardBatchDeleteBtn'),
   browserCardsList: document.getElementById('browserCardsList'),
+  browserOnlineImportModal: document.getElementById('browserOnlineImportModal'),
+  browserOnlineImportModalOverlay: document.getElementById('browserOnlineImportModalOverlay'),
+  closeBrowserOnlineImportModalBtn: document.getElementById('closeBrowserOnlineImportModalBtn'),
+  browserOnlineImportRefreshBtn: document.getElementById('browserOnlineImportRefreshBtn'),
+  browserOnlineImportTargetSelect: document.getElementById('browserOnlineImportTargetSelect'),
+  browserOnlineImportAccountInput: document.getElementById('browserOnlineImportAccountInput'),
+  browserOnlineImportSubmitBtn: document.getElementById('browserOnlineImportSubmitBtn'),
+  browserOnlineImportStatus: document.getElementById('browserOnlineImportStatus'),
   assetNoteInput: document.getElementById('assetNoteInput'),
   assetOpenPrimaryBtn: document.getElementById('assetOpenPrimaryBtn'),
   assetOpenSourceBtn: document.getElementById('assetOpenSourceBtn'),
@@ -446,6 +459,59 @@ function browserInjectTargetLabel(target) {
   return target.name || target.display_name || target.id || '未知目标';
 }
 
+function onlineImportTargetKey(t) {
+  return encodeURIComponent(
+    JSON.stringify({
+      sourceType: t.sourceType,
+      sourceId: t.sourceId,
+      port: Number(t.port || 0)
+    })
+  );
+}
+
+function parseOnlineImportTargetKey(key) {
+  try {
+    return JSON.parse(decodeURIComponent(String(key || '')));
+  } catch {
+    return null;
+  }
+}
+
+function pathsLooselyEqualForOnlineImport(a, b) {
+  const x = String(a || '').trim().replace(/\\/g, '/').toLowerCase();
+  const y = String(b || '').trim().replace(/\\/g, '/').toLowerCase();
+  if (!x || !y) {
+    return false;
+  }
+  if (x === y) {
+    return true;
+  }
+  return x.endsWith(y) || y.endsWith(x);
+}
+
+function pickOnlineImportSelectionKey(targets, groupRef) {
+  if (!Array.isArray(targets) || !targets.length) {
+    return '';
+  }
+  const card = groupRef && groupRef.items && groupRef.items[0];
+  if (!card) {
+    return onlineImportTargetKey(targets[0]);
+  }
+  const bs = card.browserSource || card.browser_source || {};
+  const ud = String(bs.userDataDir || bs.user_data_dir || '').trim();
+  const bid = String(bs.browserId || bs.browser_id || '').trim();
+  const matched = targets.find((t) => {
+    if ((t.sourceType === 'bitbrowser_api' || t.sourceType === 'bitbrowser') && bid) {
+      return String(t.sourceId) === bid;
+    }
+    if (t.sourceType === 'self_built' && ud) {
+      return pathsLooselyEqualForOnlineImport(t.sourceId, ud);
+    }
+    return false;
+  });
+  return onlineImportTargetKey(matched || targets[0]);
+}
+
 function selectedBrowserInjectTarget() {
   return state.browserInjectTargets.find((item) => browserInjectTargetId(item) === state.browserInjectSelectedTargetId) || null;
 }
@@ -670,6 +736,7 @@ function buildBrowserCard(card) {
           <button class="card-copy-btn" data-browser-card-test="${card.id}" title="测试网站连通性">测</button>
           <button class="card-copy-btn" data-browser-card-refresh="${card.id}" title="更新最新 Cookie">更</button>
           <button class="card-copy-btn" data-browser-card-edit-url="${card.id}" title="编辑地址、备注、账号密码">✎</button>
+          <button class="card-copy-btn browser-card-rewrite" data-browser-card-rewrite="${card.id}" title="重写：自建需已开调试窗口，按卡片域名在线提取该站 Cookie 并合并到本卡（同名字段以本次为准），其它域名保留">重</button>
         </div>
       </div>
       <div class="browser-card-headline">
@@ -693,8 +760,8 @@ function buildBrowserCard(card) {
             : '<span class="browser-card-chip">未测试</span>'}
       </div>
       <div class="record-footer browser-card-footer">
-        <button class="browser-card-action primary" data-browser-card-open="${card.id}" title="默认打开">打开</button>
-        <button class="browser-card-action secondary" data-browser-card-inject="${card.id}" title="指定打开">注入</button>
+        <button class="browser-card-action primary" data-browser-card-open="${card.id}" title="打开目标页（浏览器已运行时仅导航，不覆盖当前登录）">打开</button>
+        <button class="browser-card-action secondary" data-browser-card-inject="${card.id}" title="Cookie 转移到其他浏览器">注入</button>
         <button class="browser-card-action danger" data-browser-card-delete-inline="${card.id}" title="删除">删</button>
       </div>
     </div>
@@ -890,6 +957,7 @@ function renderBrowserCardsList() {
         <div class="browser-card-group-head-actions">
           <span class="count-chip">${group.items.length} 张</span>
           <button class="text-action" data-browser-group-select="${escapeHtml(group.key)}" type="button">本组全选</button>
+          <button class="text-action" data-browser-group-online-import="${escapeHtml(group.key)}" type="button">在线导入</button>
           <button class="text-action" data-browser-group-toggle="${escapeHtml(group.key)}" type="button">${collapsed ? '展开' : '收起'}</button>
         </div>
       </div>
@@ -902,6 +970,11 @@ function renderBrowserCardsList() {
         state.browserCardSelection[item.id] = true;
       });
       renderBrowserCardsList();
+    });
+    section.querySelector('[data-browser-group-online-import]')?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      const key = event.currentTarget.getAttribute('data-browser-group-online-import') || '';
+      openBrowserOnlineImportModalForGroup(key);
     });
     section.querySelector('[data-browser-group-toggle]')?.addEventListener('click', (event) => {
       event.stopPropagation();
@@ -946,6 +1019,20 @@ function renderBrowserCardsList() {
         const result = await window.click2save.refreshBrowserCardCookies(card.id);
         if (result && result.ok === false) {
           alert(result.message || '更新 Cookie 失败');
+          return;
+        }
+        applySnapshot(await window.click2save.getInitialData());
+      });
+      item.querySelector('[data-browser-card-rewrite]')?.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        const result = await window.click2save.rewriteBrowserCardCookies(card.id);
+        if (result && result.rewriteDebug) {
+          // 主进程也会 console.log；此处便于在渲染进程 DevTools 里对照卡片目录与 CDP
+          // eslint-disable-next-line no-console
+          console.log('[Click2Save][重] CDP/卡片对照（自建）', result.rewriteDebug);
+        }
+        if (result && result.ok === false) {
+          alert(result.message || '重写 Cookie 失败');
           return;
         }
         applySnapshot(await window.click2save.getInitialData());
@@ -1401,6 +1488,139 @@ function closeBrowserInjectModal() {
   state.browserInjectModalOpen = false;
   state.browserInjectCardId = null;
   els.browserInjectModal.classList.add('hidden');
+}
+
+function renderBrowserOnlineImportModal() {
+  if (!els.browserOnlineImportModal) {
+    return;
+  }
+  const targets = state.browserOnlineImportTargets || [];
+  if (els.browserOnlineImportStatus) {
+    els.browserOnlineImportStatus.textContent = state.browserOnlineImportStatus || '请选择目标并填写账号名称';
+  }
+  const sel = els.browserOnlineImportTargetSelect;
+  if (sel) {
+    const prev = state.browserOnlineImportSelectedKey;
+    sel.innerHTML = targets.length
+      ? targets
+        .map((t) => {
+          const k = onlineImportTargetKey(t);
+          return `<option value="${escapeHtml(k)}">${escapeHtml(t.label || t.sourceId || '')}</option>`;
+        })
+        .join('')
+      : '<option value="">（暂无可用目标）</option>';
+    const keys = new Set(targets.map((t) => onlineImportTargetKey(t)));
+    if (prev && keys.has(prev)) {
+      sel.value = prev;
+    } else if (state.browserOnlineImportSelectedKey && keys.has(state.browserOnlineImportSelectedKey)) {
+      sel.value = state.browserOnlineImportSelectedKey;
+    } else if (targets[0]) {
+      const initial = pickOnlineImportSelectionKey(targets, state.browserOnlineImportGroupRef);
+      sel.value = initial;
+      state.browserOnlineImportSelectedKey = initial;
+    } else {
+      state.browserOnlineImportSelectedKey = '';
+    }
+  }
+}
+
+async function loadBrowserOnlineImportTargets() {
+  state.browserOnlineImportStatus = '正在刷新在线导入目标…';
+  renderBrowserOnlineImportModal();
+  const result = await window.click2save.listOnlineImportTargets();
+  if (!result || result.ok === false) {
+    state.browserOnlineImportTargets = [];
+    state.browserOnlineImportStatus = (result && result.message) || '获取在线导入目标失败';
+    renderBrowserOnlineImportModal();
+    return;
+  }
+  state.browserOnlineImportTargets = Array.isArray(result.results) ? result.results : [];
+  const keys = new Set(state.browserOnlineImportTargets.map((t) => onlineImportTargetKey(t)));
+  const preferred = pickOnlineImportSelectionKey(state.browserOnlineImportTargets, state.browserOnlineImportGroupRef);
+  state.browserOnlineImportSelectedKey = preferred && keys.has(preferred)
+    ? preferred
+    : (state.browserOnlineImportTargets[0] ? onlineImportTargetKey(state.browserOnlineImportTargets[0]) : '');
+  state.browserOnlineImportStatus = state.browserOnlineImportTargets.length
+    ? `已发现 ${state.browserOnlineImportTargets.length} 个在线目标，请选择后填写账号名称`
+    : '未发现带调试端口的 Chrome 或未打开的比特浏览器，请先启动并开启远程调试后点「刷新」。';
+  renderBrowserOnlineImportModal();
+}
+
+function openBrowserOnlineImportModalForGroup(groupKey) {
+  const group = groupBrowserCardsBySource(browserCardsForCurrentPage()).find((g) => g.key === groupKey) || null;
+  state.browserOnlineImportGroupRef = group;
+  state.browserOnlineImportModalOpen = true;
+  state.browserOnlineImportTargets = [];
+  state.browserOnlineImportSelectedKey = '';
+  state.browserOnlineImportStatus = '正在检测在线目标…';
+  if (els.browserOnlineImportAccountInput) {
+    els.browserOnlineImportAccountInput.value = '';
+  }
+  renderBrowserOnlineImportModal();
+  els.browserOnlineImportModal?.classList.remove('hidden');
+  void loadBrowserOnlineImportTargets();
+}
+
+function closeBrowserOnlineImportModal() {
+  state.browserOnlineImportModalOpen = false;
+  state.browserOnlineImportGroupRef = null;
+  els.browserOnlineImportModal?.classList.add('hidden');
+}
+
+async function submitBrowserOnlineImport() {
+  const key = els.browserOnlineImportTargetSelect?.value || state.browserOnlineImportSelectedKey || '';
+  const target = parseOnlineImportTargetKey(key);
+  const accountName = (els.browserOnlineImportAccountInput?.value || '').trim();
+  if (!target) {
+    alert('请选择目标浏览器');
+    return;
+  }
+  const st = String(target.sourceType || '');
+  if (st === 'self_built') {
+    if (!Number(target.port || 0) && !String(target.sourceId || '').trim()) {
+      alert('请选择目标浏览器');
+      return;
+    }
+  } else if (st === 'bitbrowser_api' || st === 'bitbrowser') {
+    if (!String(target.sourceId || '').trim()) {
+      alert('请选择目标浏览器');
+      return;
+    }
+  } else {
+    alert('请选择目标浏览器');
+    return;
+  }
+  if (!accountName) {
+    alert('请填写账号名称');
+    return;
+  }
+  let inheritBrowserSource = null;
+  const groupCard = state.browserOnlineImportGroupRef?.items?.[0];
+  if (groupCard) {
+    const raw = groupCard.browserSource || groupCard.browser_source;
+    if (raw && typeof raw === 'object') {
+      try {
+        inheritBrowserSource = JSON.parse(JSON.stringify(raw));
+      } catch {
+        inheritBrowserSource = { ...raw };
+      }
+    }
+  }
+  state.browserOnlineImportStatus = '正在提取 Cookie 并导入…';
+  renderBrowserOnlineImportModal();
+  const result = await window.click2save.runOnlineImport({
+    target,
+    accountName,
+    inheritBrowserSource
+  });
+  if (!result || result.ok === false) {
+    state.browserOnlineImportStatus = (result && result.message) || '在线导入失败';
+    renderBrowserOnlineImportModal();
+    alert(state.browserOnlineImportStatus);
+    return;
+  }
+  closeBrowserOnlineImportModal();
+  applySnapshot(await window.click2save.getInitialData());
 }
 
 function openBrowserImportModal() {
@@ -1972,6 +2192,8 @@ els.browserCardModalOverlay?.addEventListener('click', closeBrowserCardModal);
 els.closeBrowserCardModalBtn?.addEventListener('click', closeBrowserCardModal);
 els.browserInjectModalOverlay?.addEventListener('click', closeBrowserInjectModal);
 els.closeBrowserInjectModalBtn?.addEventListener('click', closeBrowserInjectModal);
+els.browserOnlineImportModalOverlay?.addEventListener('click', closeBrowserOnlineImportModal);
+els.closeBrowserOnlineImportModalBtn?.addEventListener('click', closeBrowserOnlineImportModal);
 els.browserImportModalOverlay?.addEventListener('click', closeBrowserImportModal);
 els.closeBrowserImportModalBtn?.addEventListener('click', closeBrowserImportModal);
 
@@ -1995,6 +2217,18 @@ els.browserInjectMethodDbWrite?.addEventListener('change', () => {
 
 els.browserInjectConfirmBtn?.addEventListener('click', async () => {
   await executeBrowserCardInject();
+});
+
+els.browserOnlineImportRefreshBtn?.addEventListener('click', async () => {
+  await loadBrowserOnlineImportTargets();
+});
+
+els.browserOnlineImportTargetSelect?.addEventListener('change', (event) => {
+  state.browserOnlineImportSelectedKey = String(event.target.value || '');
+});
+
+els.browserOnlineImportSubmitBtn?.addEventListener('click', async () => {
+  await submitBrowserOnlineImport();
 });
 
 els.browserImportChromeTabBtn?.addEventListener('click', () => {
