@@ -1502,23 +1502,18 @@ async function defaultOpen(card, cfg) {
     const port = Number(source.port || 0);
     const userDataDir = String(source.userDataDir || source.user_data_dir || '');
     const running = port ? await isPortOpen(port) : false;
+    
+    // 如果浏览器未运行，直接启动，不写入 Cookie
+    // 让浏览器使用它自己的 Cookie（用户可能已经重新登录）
     if (!running) {
-      const dbPath = getCookiePath(path.join(userDataDir, 'Default')) || getCookiePath(userDataDir);
-      if (dbPath) {
-        const writeResult = await dbWriteCookies(dbPath, cookies, userDataDir);
-        if (writeResult.ok) {
-          const launchError = await launchSelfBuiltBrowser(port, userDataDir, url, cfg);
-          if (launchError) {
-            return { ok: false, message: launchError };
-          }
-          return { ok: true, message: `${writeResult.message}，并已打开自建浏览器` };
-        }
+      const launchError = await launchSelfBuiltBrowser(port, userDataDir, url, cfg);
+      if (launchError) {
+        return { ok: false, message: launchError };
       }
+      return { ok: true, message: '已打开自建浏览器' };
     }
-    const launchError = await launchSelfBuiltBrowser(port, userDataDir, '', cfg);
-    if (launchError) {
-      return { ok: false, message: launchError };
-    }
+    
+    // 如果浏览器正在运行，通过 CDP 注入 Cookie
     return injectCookies(port, url, cookies);
   }
   if (srcType === 'bitbrowser') {
