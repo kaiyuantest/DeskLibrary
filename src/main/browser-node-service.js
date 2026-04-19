@@ -1,5 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const net = require('net');
 const os = require('os');
 const path = require('path');
@@ -197,11 +199,82 @@ function execPowerShell(script, args = [], timeoutMs = 15000) {
   });
 }
 
+/**
+ * 去掉 PowerShell 误写入 success 流的杂项（如 VoidTaskResult、Write 返回值等），定位首个 JSON 对象起点。
+ */
+function stripLeadingNonJsonNoise(text) {
+  const s = String(text || '');
+  const m = s.match(/\{\s*"(?:cookies|error|ok)"\s*:/);
+  if (m && m.index > 0) {
+    return s.slice(m.index).trimStart();
+  }
+  if (m && m.index === 0) {
+    return s.trimStart();
+  }
+  const brace = s.indexOf('{');
+  if (brace > 0) {
+    return s.slice(brace).trimStart();
+  }
+  return s;
+}
+
+/**
+ * 解析 CDP PowerShell 脚本写到 stdout 的 JSON。
+ * 部分环境下 Task/GetResult、MemoryStream.Write 等返回值会混入 stdout，需在解析前剥离。
+ */
+function parseCdpScriptStdoutJson(raw, contextLabel = 'CDP') {
+  let text = String(raw || '').replace(/^\uFEFF/, '').trim();
+  text = stripLeadingNonJsonNoise(text);
+  if (!text) {
+    throw new Error(`${contextLabel} 脚本无输出`);
+  }
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i -= 1) {
+    const line = lines[i];
+    if (!line.startsWith('{')) {
+      continue;
+    }
+    try {
+      return JSON.parse(line);
+    } catch {
+      /* 尝试更上一行 */
+    }
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    const idx = text.indexOf('{');
+    if (idx >= 0) {
+      const tail = text.slice(idx).trim();
+      const match = tail.match(/\{[\s\S]*\}\s*$/);
+      if (match) {
+        try {
+          return JSON.parse(match[0]);
+        } catch {
+          /* fall through */
+        }
+      }
+    }
+    const snippet = text.slice(0, 280).replace(/\s+/g, ' ');
+    throw new Error(`${contextLabel} 输出不是合法 JSON。片段: ${snippet}`);
+  }
+}
+
 async function withTempCopy(filePath, callback) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-db-'));
   const tempFile = path.join(tempDir, path.basename(filePath));
   try {
-    fs.copyFileSync(filePath, tempFile);
+    try {
+      fs.copyFileSync(filePath, tempFile);
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'EBUSY' || code === 'EPERM' || code === 'EACCES') {
+        throw new Error(
+          'Cookie 数据库正被浏览器占用，无法复制本地文件。请关闭该浏览器后重试；若需浏览器保持打开，请使用分组旁的「在线导入」通过 CDP 提取。'
+        );
+      }
+      throw err;
+    }
     return await callback(tempFile, tempDir);
   } finally {
     try {
@@ -606,23 +679,110 @@ function listSelfBuiltProfiles(rootDir) {
   return results.sort((a, b) => String(a.label).localeCompare(String(b.label), 'zh-CN'));
 }
 
-function isPortOpen(port) {
+function isPortOpenOnHost(port, host) {
   return new Promise((resolve) => {
     const socket = new net.Socket();
     let settled = false;
     const finish = (value) => {
       if (settled) return;
       settled = true;
-      try { socket.destroy(); } catch {}
+      try {
+        socket.destroy();
+      } catch {}
       resolve(value);
     };
-    socket.setTimeout(500);
+    socket.setTimeout(450);
     socket.once('connect', () => finish(true));
     socket.once('timeout', () => finish(false));
     socket.once('error', () => finish(false));
-    socket.connect(port, '127.0.0.1');
+    socket.connect(port, host);
   });
 }
+
+/** 本机调试端口：先试 IPv4 再试 IPv6（部分 Chromium 只监听 ::1） */
+async function isPortOpen(port) {
+  if (await isPortOpenOnHost(port, '127.0.0.1')) {
+    return true;
+  }
+  return isPortOpenOnHost(port, '::1');
+}
+
+function httpGetJson(urlStr, timeoutMs = 4000) {
+  return new Promise((resolve, reject) => {
+    let u;
+    try {
+      u = new URL(urlStr);
+    } catch (err) {
+      reject(err);
+      return;
+    }
+    const isHttps = u.protocol === 'https:';
+    const lib = isHttps ? https : http;
+    const opts = {
+      hostname: u.hostname,
+      port: u.port || (isHttps ? 443 : 80),
+      path: `${u.pathname}${u.search}`,
+      method: 'GET',
+      timeout: timeoutMs
+    };
+    const req = lib.request(opts, (res) => {
+      let body = '';
+      res.setEncoding('utf8');
+      res.on('data', (chunk) => {
+        body += chunk;
+      });
+      res.on('end', () => {
+        let data = {};
+        try {
+          const raw = stripJsonBom(body).trim();
+          data = raw ? JSON.parse(raw) : {};
+        } catch {
+          data = {};
+        }
+        resolve({
+          ok: !!(res.statusCode && res.statusCode < 400),
+          status: res.statusCode || 0,
+          data,
+          text: body
+        });
+      });
+    });
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('timeout'));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+}
+
+function stripJsonBom(text) {
+  return String(text || '').replace(/^\uFEFF/, '');
+}
+
+/** DevTools /json 返回 JSON 数组；httpGetJson 失败解析时 data 可能为空，需从 text 再解一次 */
+function cdpJsonTargetsFromPayload(payload) {
+  if (!payload) {
+    return [];
+  }
+  if (Array.isArray(payload.data)) {
+    return payload.data;
+  }
+  try {
+    const raw = stripJsonBom(payload.text || '').trim();
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+const CDP_LOCAL_HOSTS = ['127.0.0.1', 'localhost', '[::1]'];
+const CDP_ONLINE_IMPORT_PORT_MIN = 9000;
+const CDP_ONLINE_IMPORT_PORT_MAX = 10001;
 
 async function fetchJson(url, options = {}, timeoutMs = 8000) {
   const controller = new AbortController();
@@ -632,7 +792,8 @@ async function fetchJson(url, options = {}, timeoutMs = 8000) {
     const text = await response.text();
     let data = {};
     try {
-      data = text ? JSON.parse(text) : {};
+      const raw = stripJsonBom(text).trim();
+      data = raw ? JSON.parse(raw) : {};
     } catch {
       data = {};
     }
@@ -824,7 +985,7 @@ async function loadOfflineGroups(cfg, sourceType, sourceId, filterAuth, mergeDom
   return buildGroupsFromCookies(finalCookies, mergeDomain !== false);
 }
 
-async function loadSourceCookies(cfg, sourceType, sourceId) {
+async function loadSourceCookies(cfg, sourceType, sourceId, options = {}) {
   if (sourceType === 'chrome_profile') {
     const [userDataDir, profileName] = String(sourceId || '').split('::');
     const profileDir = profileName ? path.join(userDataDir, profileName) : '';
@@ -835,6 +996,14 @@ async function loadSourceCookies(cfg, sourceType, sourceId) {
     return readCookiesFromDb(cookiePath, userDataDir);
   }
   if (sourceType === 'self_built') {
+    const explicitPort = Number(options.debugPort || options.port || 0);
+    const preferredDomain = String(options.preferredDomain || '').trim();
+    const cdpPort = await resolveSelfBuiltCdpPort(String(sourceId || ''), explicitPort);
+    if (cdpPort) {
+      // 浏览器正在运行：必须使用 CDP 读取（数据库文件被锁定）
+      return await readCookiesViaCdp(cdpPort, preferredDomain);
+    }
+    // 浏览器未运行，从数据库读取
     const cookiePath = getCookiePath(sourceId);
     if (!cookiePath) {
       throw new Error('找不到自建浏览器 Cookie 文件');
@@ -845,6 +1014,285 @@ async function loadSourceCookies(cfg, sourceType, sourceId) {
     return bitGetCookies(cfg, sourceId);
   }
   throw new Error(`未知来源类型: ${sourceType}`);
+}
+
+function extractPortFromUserDataDir(userDataDir) {
+  // 从路径中提取端口号，例如 chrome_user_data_port_9222 -> 9222
+  const match = String(userDataDir || '').match(/port[_-](\d+)/i);
+  return match ? Number(match[1]) : 0;
+}
+
+function pathsEqualWin(a, b) {
+  const left = String(a || '').trim();
+  const right = String(b || '').trim();
+  if (!left || !right) {
+    return false;
+  }
+  try {
+    return path.normalize(path.resolve(left)).toLowerCase() === path.normalize(path.resolve(right)).toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+function normalizePathKeyForDedupe(p) {
+  const s = String(p || '').trim();
+  if (!s) {
+    return '';
+  }
+  try {
+    return path.normalize(path.resolve(s)).replace(/\\/g, '/').toLowerCase();
+  } catch {
+    return s.toLowerCase();
+  }
+}
+
+function extractUserDataDirFromCdpVersionObject(d) {
+  if (!d || typeof d !== 'object') {
+    return '';
+  }
+  const direct = String(d.userDataDir || d.UserDataDir || d.user_data_dir || '').trim();
+  if (direct) {
+    return direct;
+  }
+  for (const v of Object.values(d)) {
+    if (typeof v !== 'string') {
+      continue;
+    }
+    const t = v.trim();
+    if (t.length > 6 && (t.includes('\\') || t.includes('/')) && /User Data|chrome|Chromium|chromium|profile|AppData/i.test(t)) {
+      return t;
+    }
+  }
+  return '';
+}
+
+/** 与仅 normalize 相等相比更宽松：处理 Chrome 上报路径与卡片路径略有差异、或目录名一致等情况 */
+function pathsLikelySameChromeUserData(a, b) {
+  if (pathsEqualWin(a, b)) {
+    return true;
+  }
+  const na = normalizePathKeyForDedupe(a);
+  const nb = normalizePathKeyForDedupe(b);
+  if (!na || !nb) {
+    return false;
+  }
+  if (na === nb) {
+    return true;
+  }
+  if (na.endsWith(nb) || nb.endsWith(na)) {
+    return true;
+  }
+  const ba = path.basename(na);
+  const bb = path.basename(nb);
+  if (ba && ba === bb && /^chrome_user_data_port_/i.test(ba)) {
+    return true;
+  }
+  return false;
+}
+
+/** 用 CDP HTTP /json/version 取 userDataDir（多主机 + http 直连，避免主进程 fetch 在本机调试端口上偶发失败） */
+async function getUserDataDirFromDebugPort(port) {
+  for (const host of CDP_LOCAL_HOSTS) {
+    const url = `http://${host}:${port}/json/version`;
+    let payload;
+    try {
+      payload = await httpGetJson(url, 4000);
+    } catch {
+      try {
+        payload = await fetchJson(url, {}, 4000);
+      } catch {
+        continue;
+      }
+    }
+    const udd = extractUserDataDirFromCdpVersionObject(payload?.data);
+    if (udd) {
+      return udd;
+    }
+  }
+  return '';
+}
+
+/** 能拉取 /json 且含 webSocketDebuggerUrl 即视为 CDP 可用（部分内核不返回 userDataDir） */
+async function hasCdpDevtoolsJson(port) {
+  for (const host of CDP_LOCAL_HOSTS) {
+    const url = `http://${host}:${port}/json`;
+    try {
+      const payload = await httpGetJson(url, 4000);
+      const arr = cdpJsonTargetsFromPayload(payload);
+      if (arr.some((item) => item && item.webSocketDebuggerUrl)) {
+        return true;
+      }
+    } catch {
+      try {
+        const payload = await fetchJson(url, {}, 4000);
+        const arr = cdpJsonTargetsFromPayload(payload);
+        if (arr.some((item) => item && item.webSocketDebuggerUrl)) {
+          return true;
+        }
+      } catch {
+        /* 下一主机 */
+      }
+    }
+  }
+  return false;
+}
+
+/**
+ * 与 cookie_manager v5 在线导入一致：在常用调试端口段内扫描，用 userDataDir 匹配当前 Chrome 实例。
+ * Chromedriver 使用任意 --user-data-dir（如 E:\\...\\test）时，卡片上可能没有正确 port，仅靠路径无法推断。
+ */
+async function findDebugPortForUserDataDir(expectedUserDataDir, portHint = 0) {
+  const expected = String(expectedUserDataDir || '').trim();
+  if (!expected) {
+    return 0;
+  }
+  const matchFromVersion = async (p) => {
+    if (!p || !(await isPortOpen(p))) {
+      return 0;
+    }
+    const verUdd = await getUserDataDirFromDebugPort(p);
+    if (verUdd && (pathsEqualWin(verUdd, expected) || pathsLikelySameChromeUserData(verUdd, expected))) {
+      return p;
+    }
+    if (!String(verUdd || '').trim() && (await hasCdpDevtoolsJson(p))) {
+      const expectedPort = extractPortFromUserDataDir(expected);
+      if (expectedPort && expectedPort === p) {
+        return p;
+      }
+    }
+    return 0;
+  };
+  const tryMatch = async (p) => {
+    if (!p) {
+      return 0;
+    }
+    return matchFromVersion(p);
+  };
+  const hint = Number(portHint || 0);
+  if (hint > 0) {
+    const hit = await tryMatch(hint);
+    if (hit) {
+      return hit;
+    }
+  }
+  const candidates = [];
+  for (let p = CDP_ONLINE_IMPORT_PORT_MIN; p < CDP_ONLINE_IMPORT_PORT_MAX; p += 1) {
+    if (p === hint) {
+      continue;
+    }
+    candidates.push(p);
+  }
+  const openPorts = [];
+  for (let i = 0; i < candidates.length; i += 36) {
+    const batch = candidates.slice(i, i + 36);
+    const hits = await Promise.all(batch.map(async (p) => ((await isPortOpen(p)) ? p : 0)));
+    openPorts.push(...hits.filter(Boolean));
+  }
+  openPorts.sort((a, b) => a - b);
+  for (const p of openPorts) {
+    const hit = await matchFromVersion(p);
+    if (hit) {
+      return hit;
+    }
+  }
+  return 0;
+}
+
+/**
+ * 解析用于 CDP 的端口：优先「端口 + /json/version 的 userDataDir」与卡片一致；否则扫描端口段。
+ */
+async function resolveSelfBuiltCdpPort(userDataDir, explicitPort) {
+  const udd = String(userDataDir || '').trim();
+  const hint = Number(explicitPort || 0);
+  if (udd) {
+    const found = await findDebugPortForUserDataDir(udd, hint);
+    if (found) {
+      return found;
+    }
+  }
+  // 卡片上已写调试端口且本机确有 CDP：许多 Chromium 不在 /json/version 里带 userDataDir，不能仅靠路径比对
+  if (hint > 0 && (await hasCdpDevtoolsJson(hint))) {
+    if (!udd) {
+      return hint;
+    }
+    const verUdd = await getUserDataDirFromDebugPort(hint);
+    if (!String(verUdd || '').trim()) {
+      return hint;
+    }
+    if (pathsEqualWin(verUdd, udd) || pathsLikelySameChromeUserData(verUdd, udd)) {
+      return hint;
+    }
+    // 卡片路径与 /json/version 返回的 user-data-dir 字符串不一致（中文路径编码、8.3 短路径、盘符大小写等），
+    // 但目录名已含 port_9222 且与卡片上的调试端口一致、且该端口 CDP 可用 → 仍视为同一实例
+    const portFromCardPath = extractPortFromUserDataDir(udd);
+    if (portFromCardPath && portFromCardPath === hint) {
+      return hint;
+    }
+  }
+  const fromPath = extractPortFromUserDataDir(udd);
+  if (fromPath && (await hasCdpDevtoolsJson(fromPath))) {
+    const verUdd = await getUserDataDirFromDebugPort(fromPath);
+    if (!udd || pathsEqualWin(verUdd, udd) || pathsLikelySameChromeUserData(verUdd, udd)) {
+      return fromPath;
+    }
+    // /json/version 偶发取不到 userDataDir 时：路径中已含端口且该端口确有 CDP，视为同一实例
+    if (!String(verUdd || '').trim() && /port[_-]\d+/i.test(udd)) {
+      return fromPath;
+    }
+  }
+  // 目录名端口与卡片端口一致且本机 TCP 可连：在 /json 偶发未识别时仍尝试该端口（后续 CDP 读失败会另有报错）
+  const inferredPort = extractPortFromUserDataDir(udd);
+  if (hint > 0 && inferredPort === hint && udd && (await isPortOpen(hint))) {
+    return hint;
+  }
+  return 0;
+}
+
+/** 自建/卡片来源上的远程调试端口（兼容只存 debug_port 的旧数据） */
+function browserSourceDebugPort(source = {}) {
+  const raw = source.port ?? source.debugPort ?? source.debug_port;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+/** 点击「重」时对照：卡片上的 user-data-dir / 端口 vs 本机 CDP /json/version 回报的路径 */
+async function buildRewriteSelfBuiltDebug(card, sourceId, source, effectiveDebugPort, resolvedCdpPort) {
+  const udd = String(sourceId || '').trim();
+  const liveUdd = resolvedCdpPort ? await getUserDataDirFromDebugPort(resolvedCdpPort) : '';
+  let pathsOk = null;
+  if (liveUdd && udd) {
+    pathsOk = pathsEqualWin(liveUdd, udd) || pathsLikelySameChromeUserData(liveUdd, udd);
+  } else if (!liveUdd && resolvedCdpPort) {
+    pathsOk = null;
+  }
+  const portFromFolder = extractPortFromUserDataDir(udd) || 0;
+  return {
+    card_id: card?.id,
+    card_name: card?.name || '',
+    card_userDataDir: udd,
+    card_port_fields_raw: {
+      port: source?.port,
+      debugPort: source?.debugPort,
+      debug_port: source?.debug_port
+    },
+    effective_debug_port: effectiveDebugPort || 0,
+    port_inferred_from_card_path: portFromFolder,
+    folder_port_matches_card_debug_port:
+      !!(portFromFolder && effectiveDebugPort && portFromFolder === effectiveDebugPort),
+    resolved_cdp_port: resolvedCdpPort || 0,
+    http_json_version_userDataDir: liveUdd || '(empty or unreadable)',
+    card_path_matches_version_path: pathsOk,
+    tcp_port_open_at_effective: effectiveDebugPort ? await isPortOpen(effectiveDebugPort) : false,
+    hasCdp_at_effective_port: effectiveDebugPort ? await hasCdpDevtoolsJson(effectiveDebugPort) : false,
+    hasCdp_at_resolved_port: resolvedCdpPort ? await hasCdpDevtoolsJson(resolvedCdpPort) : false,
+    hint:
+      pathsOk === false
+        ? '当前调试端口上报的 user-data-dir 与卡片里存的字符串不完全一致（中文路径编码、短路径等常见）。若目录名含 chrome_user_data_port_ 且与卡片端口一致，解析仍会使用该端口。'
+        : pathsOk === null && resolvedCdpPort
+          ? '/json/version 未返回 userDataDir，已仅凭端口可用性判断；若仍异常请核对端口是否与该窗口一致。'
+          : ''
+  };
 }
 
 function getCardSourceIdentity(card) {
@@ -873,35 +1321,169 @@ function getCardSourceIdentity(card) {
   throw new Error(`暂不支持刷新该来源类型: ${type || 'unknown'}`);
 }
 
+function cardPreferredDomainForCdp(card) {
+  const rawUrl = String(card?.openUrl || card?.open_url || '').trim();
+  if (/^https?:\/\//i.test(rawUrl)) {
+    try {
+      return new URL(rawUrl).hostname;
+    } catch {}
+  }
+  return String(card?.domain || '').trim().replace(/^\./, '');
+}
+
+/** 与 refreshCardCookies 中域名命中规则一致（用于「更」「重」子集与合并时剔除旧条目） */
+function cookieMatchesStoredDomainRow(item, targetDomain) {
+  const td = String(targetDomain || '').trim().toLowerCase();
+  if (!td) {
+    return false;
+  }
+  const cookieDomain = String(item?.domain || '').trim().toLowerCase();
+  return cookieDomain === td
+    || cookieDomain.endsWith(td)
+    || td.endsWith(cookieDomain.replace(/^\./, ''));
+}
+
+function cardTargetDomainForCookieFilter(card) {
+  const fromField = String(card?.domain || '').trim().toLowerCase();
+  if (fromField) {
+    return fromField;
+  }
+  const host = String(cardPreferredDomainForCdp(card) || '').trim().toLowerCase();
+  return host;
+}
+
 async function refreshCardCookies(card, cfg) {
   const { sourceType, sourceId } = getCardSourceIdentity(card);
-  const normalizedCookies = ensureArray(await loadSourceCookies(cfg, sourceType, sourceId))
-    .map((item) => normalizeCookie(item))
-    .filter(Boolean);
+  const source = card?.browserSource || card?.browser_source || {};
+  const debugPort = browserSourceDebugPort(source);
+  const preferredDomain = cardPreferredDomainForCdp(card);
+  const rawList = ensureArray(
+    await loadSourceCookies(cfg, sourceType, sourceId, { debugPort, preferredDomain })
+  );
+  const normalizedCookies = [];
+  for (const item of rawList) {
+    try {
+      normalizedCookies.push(normalizeCookie(item));
+    } catch {
+      /* 跳过单条异常，避免整批刷新失败 */
+    }
+  }
   const targetDomain = String(card?.domain || '').trim().toLowerCase();
   const matchedCookies = targetDomain
-    ? normalizedCookies.filter((item) => {
-      const cookieDomain = String(item?.domain || '').trim().toLowerCase();
-      return cookieDomain === targetDomain
-        || cookieDomain.endsWith(targetDomain)
-        || targetDomain.endsWith(cookieDomain.replace(/^\./, ''));
-    })
+    ? normalizedCookies.filter((item) => cookieMatchesStoredDomainRow(item, targetDomain))
     : normalizedCookies;
 
-  if (!matchedCookies.length) {
+  // 与老项目一致：先全量拉取；域名过滤仅作「优选子集」。过滤为空时仍保存全量，避免假阴性。
+  const finalCookies = matchedCookies.length ? matchedCookies : normalizedCookies;
+
+  if (!finalCookies.length) {
     return {
       ok: false,
-      message: `未从来源浏览器读取到 ${targetDomain || '当前域名'} 的最新 Cookie`
+      message: `未从来源浏览器读取到 Cookie（${targetDomain || '当前'}）`
     };
   }
 
-  const cookieNames = [...new Set(matchedCookies.map((item) => item.name).filter(Boolean))];
+  const usedFullFallback = targetDomain && !matchedCookies.length && normalizedCookies.length > 0;
+  const cookieNames = [...new Set(finalCookies.map((item) => item.name).filter(Boolean))];
+  const message = usedFullFallback
+    ? `已更新 ${finalCookies.length} 条 Cookie（域名「${targetDomain.replace(/^\.+/, '')}」未匹配到条目，已保存本次读取的全量）`
+    : `已更新 ${finalCookies.length} 条 Cookie${matchedCookies.length && matchedCookies.length < normalizedCookies.length ? `（域名命中 ${matchedCookies.length} 条）` : ''}`;
   return {
     ok: true,
-    cookies: matchedCookies,
+    cookies: finalCookies,
     cookieNames,
-    cookieCount: matchedCookies.length,
-    message: `已更新 ${matchedCookies.length} 条 Cookie`
+    cookieCount: finalCookies.length,
+    message
+  };
+}
+
+/**
+ * 「重」：在可走 CDP 时（自建浏览器）按卡片站点在线读取 Network.getAllCookies，只取与卡片域名相关的条目，
+ * 与卡上已有 Cookie 合并——同站点旧条目剔除后以本次在线结果为准，其它域名条目保留（便于后续注入）。
+ * 非自建来源仍从当前来源读取后做同样按域合并（不做全量覆盖整卡）。
+ */
+async function rewriteBrowserCardCookies(card, cfg) {
+  const { sourceType, sourceId } = getCardSourceIdentity(card);
+  const source = card?.browserSource || card?.browser_source || {};
+  const debugPort = browserSourceDebugPort(source);
+
+  let rewriteDebug = null;
+  if (sourceType === 'self_built') {
+    const resolved = await resolveSelfBuiltCdpPort(String(sourceId || ''), debugPort);
+    rewriteDebug = await buildRewriteSelfBuiltDebug(card, sourceId, source, debugPort, resolved);
+    // eslint-disable-next-line no-console
+    console.log('[Click2Save][重][自建] CDP/卡片对照', JSON.stringify(rewriteDebug, null, 2));
+    if (!resolved) {
+      return {
+        ok: false,
+        message:
+          '「重」需该自建浏览器已打开并启用远程调试（CDP）。请先打开对应窗口（如 9222）并在其中登录目标站，再点此按钮以按域名在线提取并合并 Cookie。',
+        rewriteDebug
+      };
+    }
+  }
+
+  const preferredDomain = cardPreferredDomainForCdp(card);
+  const rawList = ensureArray(
+    await loadSourceCookies(cfg, sourceType, sourceId, { debugPort, preferredDomain })
+  );
+  const normalizedCookies = [];
+  for (const item of rawList) {
+    try {
+      normalizedCookies.push(normalizeCookie(item, String(card?.openUrl || card?.open_url || '').trim()));
+    } catch {
+      /* 跳过单条异常 */
+    }
+  }
+  if (!normalizedCookies.length) {
+    return {
+      ok: false,
+      message: '未从来源读取到 Cookie，请确认自建浏览器已开远程调试或比特已运行',
+      rewriteDebug
+    };
+  }
+
+  const targetDomain = cardTargetDomainForCookieFilter(card);
+  if (!targetDomain) {
+    return {
+      ok: false,
+      message: '卡片缺少站点域名或打开地址，无法只重写该站 Cookie。请编辑卡片填写域名或完整 URL。',
+      rewriteDebug
+    };
+  }
+
+  const matchedFresh = normalizedCookies.filter((item) => cookieMatchesStoredDomainRow(item, targetDomain));
+  if (!matchedFresh.length) {
+    const label = targetDomain.replace(/^\.+/, '');
+    return {
+      ok: false,
+      message: `未从当前在线会话读取到「${label}」相关 Cookie。请在已附加的调试窗口中打开该站并完成登录后再点「重」；不做全站 Cookie 回退以免无法注入。`,
+      rewriteDebug
+    };
+  }
+
+  const existingRaw = ensureArray(card.cookies);
+  const openUrl = String(card?.openUrl || card?.open_url || '').trim();
+  const existingNorm = [];
+  for (const item of existingRaw) {
+    try {
+      existingNorm.push(normalizeCookie(item, openUrl));
+    } catch {
+      /* 跳过单条异常 */
+    }
+  }
+  const kept = existingNorm.filter((c) => !cookieMatchesStoredDomainRow(c, targetDomain));
+  const merged = [...kept, ...matchedFresh];
+
+  const cookieNames = [...new Set(merged.map((item) => item.name).filter(Boolean))];
+  const label = targetDomain.replace(/^\.+/, '');
+  return {
+    ok: true,
+    cookies: merged,
+    cookieNames,
+    cookieCount: merged.length,
+    message: `已按「${label}」在线合并 ${matchedFresh.length} 条 Cookie（同站条目以本次为准），其余域名共保留 ${kept.length} 条`,
+    rewriteDebug
   };
 }
 
@@ -1040,8 +1622,31 @@ function isDomainMatchForFilter(candidate, expected) {
 }
 
 async function getDevtoolsWsUrl(port, preferredDomain = '') {
-  const payload = await fetchJson(`http://127.0.0.1:${port}/json`, {}, 4000);
-  const pages = Array.isArray(payload.data) ? payload.data : [];
+  let pages = [];
+  let lastErr = null;
+  for (const host of CDP_LOCAL_HOSTS) {
+    const url = `http://${host}:${port}/json`;
+    try {
+      const payload = await httpGetJson(url, 5000);
+      const arr = cdpJsonTargetsFromPayload(payload);
+      if (arr.length) {
+        pages = arr;
+        break;
+      }
+    } catch (e) {
+      lastErr = e;
+      try {
+        const payload = await fetchJson(url, {}, 5000);
+        const arr = cdpJsonTargetsFromPayload(payload);
+        if (arr.length) {
+          pages = arr;
+          break;
+        }
+      } catch (e2) {
+        lastErr = e2;
+      }
+    }
+  }
   let page = null;
   const expected = String(preferredDomain || '').trim().toLowerCase();
   if (expected) {
@@ -1060,7 +1665,8 @@ async function getDevtoolsWsUrl(port, preferredDomain = '') {
     page = pages.find((item) => item?.type === 'page' && item?.webSocketDebuggerUrl) || pages.find((item) => item?.webSocketDebuggerUrl);
   }
   if (!page?.webSocketDebuggerUrl) {
-    throw new Error('未找到可用的 DevTools 页面连接');
+    const extra = lastErr && lastErr.message ? ` (${String(lastErr.message)})` : '';
+    throw new Error(`未找到可用的 DevTools 页面连接${extra}`);
   }
   return page.webSocketDebuggerUrl;
 }
@@ -1080,14 +1686,14 @@ async function readCookiesViaCdp(port, preferredDomain = '') {
     "  $script:msgId++",
     "  $body=@{id=$script:msgId;method=$method;params=$params} | ConvertTo-Json -Depth 16 -Compress",
     "  $bytes=$enc.GetBytes($body)",
-    "  $seg=[ArraySegment[byte]]::new($bytes)",
-    "  $ws.SendAsync($seg,[System.Net.WebSockets.WebSocketMessageType]::Text,$true,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "  $seg=[System.ArraySegment[byte]]::new($bytes)",
+    "  [void]($ws.SendAsync($seg,[System.Net.WebSockets.WebSocketMessageType]::Text,$true,[System.Threading.CancellationToken]::None).GetAwaiter().GetResult())",
     "  while($true){",
     "    $buffer=New-Object byte[] 524288",
     "    $ms=New-Object IO.MemoryStream",
     "    do {",
-    "      $res=$ws.ReceiveAsync([ArraySegment[byte]]::new($buffer),[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
-    "      if($res.Count -gt 0){ $ms.Write($buffer,0,$res.Count) }",
+    "      $res=$ws.ReceiveAsync([System.ArraySegment[byte]]::new($buffer),[System.Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "      if($res.Count -gt 0){ [void]($ms.Write($buffer,0,$res.Count)) }",
     "    } while(-not $res.EndOfMessage)",
     "    $text=$enc.GetString($ms.ToArray())",
     "    if(-not $text){ continue }",
@@ -1099,7 +1705,7 @@ async function readCookiesViaCdp(port, preferredDomain = '') {
     "  $payload=Get-Content -LiteralPath $payloadPath -Raw | ConvertFrom-Json",
     "  $ws=New-Object System.Net.WebSockets.ClientWebSocket",
     "  $uri=[Uri]$payload.wsUrl",
-    "  $ws.ConnectAsync($uri,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "  [void]($ws.ConnectAsync($uri,[System.Threading.CancellationToken]::None).GetAwaiter().GetResult())",
     "  $script:msgId=0",
     "  [void](Send-Cdp 'Network.enable' @{})",
     "  $resp=Send-Cdp 'Network.getAllCookies' @{}",
@@ -1112,7 +1718,7 @@ async function readCookiesViaCdp(port, preferredDomain = '') {
     "  Write-Json @{error=$message;cookies=@()}",
     "} finally {",
     "  if($ws -and (($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) -or ($ws.State -eq [System.Net.WebSockets.WebSocketState]::CloseReceived))){",
-    "    try { $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',[Threading.CancellationToken]::None).GetAwaiter().GetResult() } catch {}",
+    "    try { [void]($ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',[System.Threading.CancellationToken]::None).GetAwaiter().GetResult()) } catch {}",
     "  }",
     "  if($ws){ $ws.Dispose() }",
     "}"
@@ -1120,11 +1726,87 @@ async function readCookiesViaCdp(port, preferredDomain = '') {
   try {
     fs.writeFileSync(payloadFile, JSON.stringify({ wsUrl }), 'utf8');
     const stdout = await execPowerShell(script, [payloadFile]);
-    const parsed = JSON.parse(String(stdout || '').trim() || '{}');
+    const parsed = parseCdpScriptStdoutJson(stdout, '读取 Cookie');
     if (parsed?.error) {
       throw new Error(String(parsed.error));
     }
     return ensureArray(parsed?.cookies);
+  } finally {
+    try {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    } catch {}
+  }
+}
+
+/** 仅通过 CDP 导航，不写入 Cookie（避免「打开」卡片时用旧快照覆盖用户刚登录的会话） */
+async function navigateViaCdp(port, preferredDomain, targetUrl) {
+  const wsUrl = await getDevtoolsWsUrl(port, preferredDomain);
+  const url = String(targetUrl || '').trim();
+  if (!url) {
+    return { ok: false, message: '缺少要打开的地址' };
+  }
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-cdp-nav-'));
+  const payloadFile = path.join(tempDir, 'payload.json');
+  const script = [
+    "param([string]$payloadPath)",
+    "$ErrorActionPreference='Stop'",
+    "$ProgressPreference='SilentlyContinue'",
+    "$ws=$null",
+    "$enc=[Text.Encoding]::UTF8",
+    "function Write-Json($obj){ [Console]::Out.Write(($obj | ConvertTo-Json -Depth 16 -Compress)) }",
+    "function Send-Cdp($method,$params){",
+    "  $script:msgId++",
+    "  $body=@{id=$script:msgId;method=$method;params=$params} | ConvertTo-Json -Depth 16 -Compress",
+    "  $bytes=$enc.GetBytes($body)",
+    "  $seg=[System.ArraySegment[byte]]::new($bytes)",
+    "  [void]($ws.SendAsync($seg,[System.Net.WebSockets.WebSocketMessageType]::Text,$true,[System.Threading.CancellationToken]::None).GetAwaiter().GetResult())",
+    "  while($true){",
+    "    $buffer=New-Object byte[] 262144",
+    "    $ms=New-Object IO.MemoryStream",
+    "    do {",
+    "      $res=$ws.ReceiveAsync([System.ArraySegment[byte]]::new($buffer),[System.Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "      if($res.Count -gt 0){ [void]($ms.Write($buffer,0,$res.Count)) }",
+    "    } while(-not $res.EndOfMessage)",
+    "    $text=$enc.GetString($ms.ToArray())",
+    "    if(-not $text){ continue }",
+    "    $obj=$text | ConvertFrom-Json",
+    "    if($obj.id -eq $script:msgId){ return $obj }",
+    "  }",
+    "}",
+    "try {",
+    "  $payload=Get-Content -LiteralPath $payloadPath -Raw | ConvertFrom-Json",
+    "  $ws=New-Object System.Net.WebSockets.ClientWebSocket",
+    "  $uri=[Uri]$payload.wsUrl",
+    "  [void]($ws.ConnectAsync($uri,[System.Threading.CancellationToken]::None).GetAwaiter().GetResult())",
+    "  $script:msgId=0",
+    "  [void](Send-Cdp 'Page.enable' @{})",
+    "  $tUrl=[string]$payload.targetUrl",
+    "  if($tUrl){ [void](Send-Cdp 'Page.navigate' @{url=$tUrl}) }",
+    "  Write-Json @{ok=$true}",
+    "} catch {",
+    "  $message='CDP navigate failed'",
+    "  if($_.Exception -and $_.Exception.Message){ $message=[string]$_.Exception.Message }",
+    "  Write-Json @{ok=$false;error=$message}",
+    "} finally {",
+    "  if($ws -and (($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) -or ($ws.State -eq [System.Net.WebSockets.WebSocketState]::CloseReceived))){",
+    "    try { [void]($ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',[System.Threading.CancellationToken]::None).GetAwaiter().GetResult()) } catch {}",
+    "  }",
+    "  if($ws){ $ws.Dispose() }",
+    "}"
+  ].join('\r\n');
+  try {
+    fs.writeFileSync(payloadFile, JSON.stringify({ wsUrl, targetUrl: url }), 'utf8');
+    const stdout = await execPowerShell(script, [payloadFile]);
+    const parsed = parseCdpScriptStdoutJson(stdout, 'CDP 导航');
+    if (parsed?.error) {
+      return { ok: false, message: String(parsed.error) };
+    }
+    if (parsed && parsed.ok === false) {
+      return { ok: false, message: String(parsed.error || '导航失败') };
+    }
+    return { ok: true, message: '已导航到目标页（未修改当前 Cookie）' };
+  } catch (error) {
+    return { ok: false, message: error && error.message ? error.message : 'CDP 导航失败' };
   } finally {
     try {
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -1146,14 +1828,14 @@ async function runCdpScript(payload) {
     "  $script:msgId++",
     "  $body=@{id=$script:msgId;method=$method;params=$params} | ConvertTo-Json -Depth 16 -Compress",
     "  $bytes=$enc.GetBytes($body)",
-    "  $seg=[ArraySegment[byte]]::new($bytes)",
-    "  $ws.SendAsync($seg,[System.Net.WebSockets.WebSocketMessageType]::Text,$true,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "  $seg=[System.ArraySegment[byte]]::new($bytes)",
+    "  [void]($ws.SendAsync($seg,[System.Net.WebSockets.WebSocketMessageType]::Text,$true,[System.Threading.CancellationToken]::None).GetAwaiter().GetResult())",
     "  while($true){",
     "    $buffer=New-Object byte[] 262144",
     "    $ms=New-Object IO.MemoryStream",
     "    do {",
-    "      $res=$ws.ReceiveAsync([ArraySegment[byte]]::new($buffer),[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
-    "      if($res.Count -gt 0){ $ms.Write($buffer,0,$res.Count) }",
+    "      $res=$ws.ReceiveAsync([System.ArraySegment[byte]]::new($buffer),[System.Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "      if($res.Count -gt 0){ [void]($ms.Write($buffer,0,$res.Count)) }",
     "    } while(-not $res.EndOfMessage)",
     "    $text=$enc.GetString($ms.ToArray())",
     "    if(-not $text){ continue }",
@@ -1194,7 +1876,7 @@ async function runCdpScript(payload) {
     "  }",
     "  return ''",
     "}",
-    "function Invoke-SetCookie($params){",
+    "function Invoke-SetCookie($params,$cookieObj){",
     "  $lastError=''",
     "  $attempts=New-Object System.Collections.Generic.List[hashtable]",
     "  $attempts.Add((Copy-Map $params))",
@@ -1212,6 +1894,13 @@ async function runCdpScript(payload) {
     "  }",
     "  $urlOnly=Remove-Keys $reduced @('domain','sameSite')",
     "  $attempts.Add($urlOnly)",
+    "  if($cookieObj -and $cookieObj.url){",
+    "    $pureUrl=@{ name=[string]$params.name;value=[string]$params.value;path=[string]$params.path;secure=[bool]$params.secure;httpOnly=[bool]$params.httpOnly }",
+    "    if($params.expires){ $pureUrl.expires=[double]$params.expires }",
+    "    if($cookieObj.sameSite){ $pureUrl.sameSite=[string]$cookieObj.sameSite }",
+    "    $pureUrl.url=[string]$cookieObj.url",
+    "    $attempts.Add($pureUrl)",
+    "  }",
     "  foreach($attempt in $attempts){",
     "    if(((-not $attempt.ContainsKey('domain')) -or (-not [string]$attempt.domain)) -and ((-not $attempt.ContainsKey('url')) -or (-not [string]$attempt.url))){ continue }",
     "    $resp=Send-Cdp 'Network.setCookie' $attempt",
@@ -1229,10 +1918,25 @@ async function runCdpScript(payload) {
     "  if($payload.purgeHosts){ $purgeHosts=@($payload.purgeHosts) }",
     "  $ws=New-Object System.Net.WebSockets.ClientWebSocket",
     "  $uri=[Uri]$payload.wsUrl",
-    "  $ws.ConnectAsync($uri,[Threading.CancellationToken]::None).GetAwaiter().GetResult()",
+    "  [void]($ws.ConnectAsync($uri,[System.Threading.CancellationToken]::None).GetAwaiter().GetResult())",
     "  $script:msgId=0",
     "  [void](Send-Cdp 'Network.enable' @{})",
     "  [void](Send-Cdp 'Page.enable' @{})",
+    "  $getAllResp=Send-Cdp 'Network.getAllCookies' @{}",
+    "  $existingCookies=@()",
+    "  if($getAllResp.result -and $getAllResp.result.cookies){ $existingCookies=@($getAllResp.result.cookies) }",
+    "  foreach($cookie in $cookies){",
+    "    $targetDomain=[string]$cookie.domain",
+    "    $targetName=[string]$cookie.name",
+    "    $targetPath=if($cookie.path){ [string]$cookie.path } else { '/' }",
+    "    foreach($existing in $existingCookies){",
+    "      if(([string]$existing.domain -eq $targetDomain) -and ([string]$existing.name -eq $targetName) -and (([string]$existing.path -eq $targetPath) -or ((-not $existing.path -or $existing.path -eq '') -and $targetPath -eq '/'))){",
+    "        $deleteParams=@{ name=[string]$existing.name; domain=[string]$existing.domain }",
+    "        if($existing.path){ $deleteParams.path=[string]$existing.path }",
+    "        [void](Send-Cdp 'Network.deleteCookies' $deleteParams)",
+    "      }",
+    "    }",
+    "  }",
     "  $ok=0",
     "  $fail=0",
     "  $errors=New-Object System.Collections.Generic.List[string]",
@@ -1260,8 +1964,8 @@ async function runCdpScript(payload) {
     "      secure=[bool]$cookie.secure;",
     "      httpOnly=[bool]$cookie.httpOnly",
     "    }",
-    "    if($cookie.url){ $params.url=[string]$cookie.url }",
     "    if($cookie.domain){ $params.domain=[string]$cookie.domain }",
+    "    elseif($cookie.url){ $params.url=[string]$cookie.url }",
     "    if($cookie.expiry){ $params.expires=[double]$cookie.expiry }",
     "    if($cookie.sameSite){ $params.sameSite=[string]$cookie.sameSite }",
     "    if($cookie.sourceScheme -ne $null -and $cookie.sourceScheme -ne ''){ $params.sourceScheme=[string]$cookie.sourceScheme }",
@@ -1273,7 +1977,7 @@ async function runCdpScript(payload) {
     "        if($params.domain){ [void](Send-Cdp 'Network.deleteCookies' @{name=$params.name; domain=$params.domain; path=$params.path}) }",
     "      } catch {}",
     "    }",
-    "    $setResult=Invoke-SetCookie $params",
+    "    $setResult=Invoke-SetCookie $params $cookie",
     "    if($setResult.success){",
     "      $ok++",
     "    } else {",
@@ -1289,7 +1993,7 @@ async function runCdpScript(payload) {
     "  Write-Json @{ok=0;fail=0;errors=@($message)}",
     "} finally {",
     "  if($ws -and (($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) -or ($ws.State -eq [System.Net.WebSockets.WebSocketState]::CloseReceived))){",
-    "    try { $ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',[Threading.CancellationToken]::None).GetAwaiter().GetResult() } catch {}",
+    "    try { [void]($ws.CloseAsync([System.Net.WebSockets.WebSocketCloseStatus]::NormalClosure,'done',[System.Threading.CancellationToken]::None).GetAwaiter().GetResult()) } catch {}",
     "  }",
     "  if($ws){ $ws.Dispose() }",
     "}"
@@ -1297,15 +2001,14 @@ async function runCdpScript(payload) {
   try {
     fs.writeFileSync(payloadFile, JSON.stringify(payload), 'utf8');
     const stdout = await execPowerShell(script, [payloadFile]);
-    const text = String(stdout || '').trim();
     try {
-      return JSON.parse(text || '{}');
-    } catch {
-      const match = text.match(/\{[\s\S]*\}$/);
-      if (match) {
-        return JSON.parse(match[0]);
-      }
-      return { ok: 0, fail: 0, errors: [text || 'CDP 脚本未返回有效 JSON'] };
+      return parseCdpScriptStdoutJson(stdout, 'CDP 注入');
+    } catch (err) {
+      return {
+        ok: 0,
+        fail: 0,
+        errors: [String(err && err.message ? err.message : 'CDP 脚本未返回有效 JSON')]
+      };
     }
   } finally {
     try {
@@ -1397,6 +2100,7 @@ async function dbWriteCookies(cookieDbPath, cookies, userDataDir) {
         top_frame_site_key: `'${escapeSqlText(cookie.topFrameSiteKey || '')}'`,
         has_cross_site_ancestor: cookie.hasCrossSiteAncestor ? '1' : '0'
       };
+      // 精确删除：只删除 domain + name + path 完全匹配的 Cookie
       statements.push(
         `DELETE FROM cookies WHERE host_key='${escapeSqlText(cookie.domain)}' AND name='${escapeSqlText(cookie.name)}' AND path='${escapeSqlText(cookie.path || '/')}';`
       );
@@ -1486,7 +2190,8 @@ function openUrlWithSystemChrome(url, profileName = '', userDataDir = '') {
 async function findCookieDbForPort(port) {
   try {
     const payload = await fetchJson(`http://127.0.0.1:${port}/json/version`, {}, 3000);
-    const userDataDir = String(payload?.data?.userDataDir || '');
+    const d = payload?.data || {};
+    const userDataDir = String(d.userDataDir || d.UserDataDir || '');
     const cookieDbPath = getCookiePath(path.join(userDataDir, 'Default')) || getCookiePath(userDataDir);
     return {
       cookieDbPath,
@@ -1548,27 +2253,25 @@ async function defaultOpen(card, cfg) {
     return { ok, message: ok ? '已用系统 Chrome 打开' : '未找到系统 Chrome' };
   }
   if (srcType === 'self_built') {
-    const port = Number(source.port || 0);
+    let port = browserSourceDebugPort(source);
     const userDataDir = String(source.userDataDir || source.user_data_dir || '');
+    if (!port && userDataDir) {
+      port = extractPortFromUserDataDir(userDataDir);
+    }
     const running = port ? await isPortOpen(port) : false;
+    
+    // 如果浏览器未运行，直接启动，不写入 Cookie
+    // 让浏览器使用它自己的 Cookie（用户可能已经重新登录）
     if (!running) {
-      const dbPath = getCookiePath(path.join(userDataDir, 'Default')) || getCookiePath(userDataDir);
-      if (dbPath) {
-        const writeResult = await dbWriteCookies(dbPath, cookies, userDataDir);
-        if (writeResult.ok) {
-          const launchError = await launchSelfBuiltBrowser(port, userDataDir, url, cfg);
-          if (launchError) {
-            return { ok: false, message: launchError };
-          }
-          return { ok: true, message: `${writeResult.message}，并已打开自建浏览器` };
-        }
+      const launchError = await launchSelfBuiltBrowser(port, userDataDir, url, cfg);
+      if (launchError) {
+        return { ok: false, message: launchError };
       }
+      return { ok: true, message: '已打开自建浏览器' };
     }
-    const launchError = await launchSelfBuiltBrowser(port, userDataDir, '', cfg);
-    if (launchError) {
-      return { ok: false, message: launchError };
-    }
-    return injectCookies(port, url, cookies);
+    // 浏览器已在运行：只导航到卡片地址，不把卡片里的 Cookie 快照写回（避免覆盖用户当前登录态）
+    const pref = cardPreferredDomainForCdp(card);
+    return navigateViaCdp(port, pref, url);
   }
   if (srcType === 'bitbrowser') {
     const browserId = String(source.browserId || source.browser_id || '');
@@ -1576,7 +2279,9 @@ async function defaultOpen(card, cfg) {
     if (!opened?.port) {
       return { ok: false, message: '打开比特浏览器失败' };
     }
-    return injectCookies(opened.port, url, cookies);
+    // 与自建一致：不在「打开」时用卡片快照覆盖比特里当前会话
+    const pref = cardPreferredDomainForCdp(card);
+    return navigateViaCdp(opened.port, pref, url);
   }
   return { ok: false, message: `未知来源类型: ${srcType}` };
 }
@@ -1604,8 +2309,28 @@ async function injectOpen(card, cfg) {
       message: `${writeResult.message}${opened ? '，并已打开系统 Chrome' : '，但未能自动打开系统 Chrome'}`
     };
   }
-  if (srcType === 'self_built' || srcType === 'bitbrowser') {
-    return defaultOpen(card, cfg);
+  if (srcType === 'self_built') {
+    let port = browserSourceDebugPort(source);
+    const userDataDir = String(source.userDataDir || source.user_data_dir || '');
+    if (!port && userDataDir) {
+      port = extractPortFromUserDataDir(userDataDir);
+    }
+    const running = port ? await isPortOpen(port) : false;
+    if (!running) {
+      const launchError = await launchSelfBuiltBrowser(port, userDataDir, url, cfg);
+      if (launchError) {
+        return { ok: false, message: launchError };
+      }
+    }
+    return injectCookies(port, url, cookies);
+  }
+  if (srcType === 'bitbrowser') {
+    const browserId = String(source.browserId || source.browser_id || '');
+    const opened = await bitOpenBrowser(cfg, browserId);
+    if (!opened?.port) {
+      return { ok: false, message: '打开比特浏览器失败' };
+    }
+    return injectCookies(opened.port, url, cookies);
   }
   return { ok: false, message: `未知来源类型: ${srcType}` };
 }
@@ -1646,8 +2371,13 @@ async function injectToTarget(card, target, method, cfg) {
     return { ok: true, message: `已写入 ${writeResult.count} 条 Cookie，重启目标浏览器后生效` };
   }
 
+  if (type === 'self_built' && !port && userDataDir) {
+    port = extractPortFromUserDataDir(userDataDir);
+  }
   if (type === 'self_built' && !port) {
-    port = Number(target?.port || 0);
+    return { ok: false, message: '目标为自建浏览器但未指定调试端口，且用户目录路径中无法解析端口（请确认目录名为 chrome_user_data_port_端口 或在目标中填写端口）' };
+  }
+  if (type === 'self_built' && port && !(await isPortOpen(port))) {
     const launchError = await launchSelfBuiltBrowser(port, userDataDir, '', cfg);
     if (launchError) {
       return { ok: false, message: launchError };
@@ -1667,6 +2397,224 @@ async function injectToTarget(card, target, method, cfg) {
     return { ok: false, message: '目标浏览器未运行，无法执行注入' };
   }
   return injectCookies(port, url, cookies);
+}
+
+async function listOnlineImportTargets(cfg) {
+  const items = [];
+  const seenUdd = new Set();
+  const seenPortOnly = new Set();
+  const portList = [];
+  for (let p = CDP_ONLINE_IMPORT_PORT_MIN; p < CDP_ONLINE_IMPORT_PORT_MAX; p += 1) {
+    portList.push(p);
+  }
+  const openDebugPorts = [];
+  for (let i = 0; i < portList.length; i += 36) {
+    const batch = portList.slice(i, i + 36);
+    const hits = await Promise.all(batch.map(async (port) => ((await isPortOpen(port)) ? port : 0)));
+    openDebugPorts.push(...hits.filter(Boolean));
+  }
+  openDebugPorts.sort((a, b) => a - b);
+  for (const p of openDebugPorts) {
+    const udd = await getUserDataDirFromDebugPort(p);
+    if (udd) {
+      const nk = normalizePathKeyForDedupe(udd);
+      if (nk && seenUdd.has(nk)) {
+        continue;
+      }
+      if (nk) {
+        seenUdd.add(nk);
+      }
+      items.push({
+        sourceType: 'self_built',
+        sourceId: udd,
+        port: p,
+        label: `在线调试 · ${path.basename(udd)} · 端口 ${p}`
+      });
+      continue;
+    }
+    if (seenPortOnly.has(p)) {
+      continue;
+    }
+    const cdpOk = await hasCdpDevtoolsJson(p);
+    if (!cdpOk) {
+      continue;
+    }
+    seenPortOnly.add(p);
+    items.push({
+      sourceType: 'self_built',
+      sourceId: '',
+      port: p,
+      label: `在线调试 · 端口 ${p}（CDP 可用，未返回用户目录）`
+    });
+  }
+  try {
+    const bitPortMap = await bitGetOpenPorts(cfg);
+    for (const item of await bitGetBrowsers(cfg)) {
+      const browserId = String(item?.id || '');
+      if (!browserId || !Object.prototype.hasOwnProperty.call(bitPortMap, browserId)) {
+        continue;
+      }
+      const bp = Number.parseInt(String(bitPortMap[browserId] || ''), 10) || 0;
+      items.push({
+        sourceType: 'bitbrowser_api',
+        sourceId: browserId,
+        port: bp,
+        label: `比特浏览器（运行中）· ${String(item?.name || browserId)} · 端口 ${bp}`
+      });
+    }
+  } catch {
+    /* 忽略比特列表失败 */
+  }
+  return items.sort((a, b) => String(a.label).localeCompare(String(b.label), 'zh-CN'));
+}
+
+function onlineImportBuildCards(cfg, sourceType, sourceId, groups, accountName) {
+  const base = buildImportCards(cfg, sourceType, sourceId, groups);
+  const nameBase = String(accountName || '').trim();
+  if (!nameBase) {
+    return base;
+  }
+  if (base.length === 1) {
+    return [{ ...base[0], name: nameBase }];
+  }
+  return base.map((card) => {
+    const dom = String(card.domain || '').replace(/^\.+/, '');
+    return { ...card, name: dom ? `${nameBase} · ${dom}` : nameBase };
+  });
+}
+
+/**
+ * 将「当前分组」卡片的 browserSource 规范成导入卡片应写入的 browser_source（与 buildBrowserSource 字段一致）。
+ * 在线导入从 CDP 读的是另一套 userDataDir/端口，卡片归属应以点击「在线导入」的分组为准，否则会误归到指纹调试端口对应目录。
+ */
+function flattenBrowserSourceForOnlineImportInherit(src) {
+  if (!src || typeof src !== 'object') {
+    return null;
+  }
+  const t = String(src.type || '').trim();
+  if (t === 'chrome_profile') {
+    const userDataDir = String(src.userDataDir || src.user_data_dir || '').trim();
+    const profileName = String(src.profileName || src.profile_name || '').trim();
+    if (!userDataDir || !profileName) {
+      return null;
+    }
+    const infoCache = readLocalStateNames(userDataDir);
+    const displayName = String(
+      src.displayName || src.display_name || infoCache?.[profileName]?.name || profileName || 'Default'
+    ).trim();
+    return {
+      type: 'chrome_profile',
+      profile_name: profileName,
+      display_name: displayName,
+      user_data_dir: userDataDir,
+      label: String(src.label || '').trim() || `系统 Chrome · ${displayName}`
+    };
+  }
+  if (t === 'self_built') {
+    const userDataDir = String(src.userDataDir || src.user_data_dir || '').trim();
+    if (!userDataDir) {
+      return null;
+    }
+    const dirName = path.basename(userDataDir);
+    const pathPort = Number.parseInt(String(dirName.replace('chrome_user_data_port_', '')), 10) || 0;
+    const port = Number(src.port || src.debugPort || 0) || pathPort || 0;
+    return {
+      type: 'self_built',
+      port,
+      user_data_dir: userDataDir,
+      name: port ? `端口 ${port}` : dirName,
+      label: String(src.label || '').trim() || `自建浏览器 · ${port ? `端口 ${port}` : dirName}`
+    };
+  }
+  if (t === 'bitbrowser' || t === 'bitbrowser_api') {
+    const id = String(src.browserId || src.browser_id || '').trim();
+    if (!id) {
+      return null;
+    }
+    const name = String(src.name || id).trim() || id;
+    const port = Number(src.port || 0) || 0;
+    return {
+      type: 'bitbrowser',
+      browser_id: id,
+      name,
+      port,
+      label: String(src.label || '').trim() || `比特浏览器 · ${id}`
+    };
+  }
+  return null;
+}
+
+function applyInheritedBrowserSourceToOnlineImportCards(cards, inheritedRaw) {
+  const flat = flattenBrowserSourceForOnlineImportInherit(inheritedRaw);
+  if (!flat) {
+    return ensureArray(cards);
+  }
+  return ensureArray(cards).map((card) => {
+    const next = { ...card, browser_source: { ...flat } };
+    delete next.browserSource;
+    return next;
+  });
+}
+
+async function onlineImportCapture(cfg, payload = {}) {
+  const target = payload.target || {};
+  const accountName = String(payload.accountName || '').trim();
+  if (!accountName) {
+    return { ok: false, message: '请填写账号名称' };
+  }
+  const sourceType = String(target.sourceType || '');
+  const sourceId = String(target.sourceId || '');
+  const port = Number(target.port || 0);
+  if (!sourceType) {
+    return { ok: false, message: '请选择目标浏览器' };
+  }
+  if ((sourceType === 'bitbrowser_api' || sourceType === 'bitbrowser') && !sourceId) {
+    return { ok: false, message: '请选择目标浏览器' };
+  }
+  if (sourceType === 'self_built' && !port && !sourceId) {
+    return { ok: false, message: '请选择目标浏览器' };
+  }
+
+  let rawList = [];
+  if (sourceType === 'bitbrowser_api' || sourceType === 'bitbrowser') {
+    rawList = await bitGetCookies(cfg, sourceId);
+  } else if (sourceType === 'self_built') {
+    const cdpPort = await resolveSelfBuiltCdpPort(sourceId, port);
+    if (!cdpPort) {
+      return {
+        ok: false,
+        message: `无法通过 CDP 连接该实例。请确认已开启远程调试（如 --remote-debugging-port），且端口在 ${CDP_ONLINE_IMPORT_PORT_MIN}–${CDP_ONLINE_IMPORT_PORT_MAX - 1} 扫描范围内。`
+      };
+    }
+    rawList = await readCookiesViaCdp(cdpPort, '');
+  } else {
+    return { ok: false, message: `暂不支持在线导入来源类型：${sourceType}` };
+  }
+
+  const normalizedCookies = [];
+  for (const item of ensureArray(rawList)) {
+    try {
+      normalizedCookies.push(normalizeCookie(item));
+    } catch {
+      /* 跳过单条异常 */
+    }
+  }
+  if (!normalizedCookies.length) {
+    return { ok: false, message: '未读取到可用 Cookie' };
+  }
+  const groups = buildGroupsFromCookies(normalizedCookies, true);
+  if (!groups.length) {
+    return { ok: false, message: '未生成可导入的域名分组' };
+  }
+  const st = sourceType === 'bitbrowser' ? 'bitbrowser_api' : sourceType;
+  const cards = onlineImportBuildCards(cfg, st, sourceId, groups, accountName);
+  const inherited = payload.inheritBrowserSource || payload.inherit_browser_source;
+  const finalCards = applyInheritedBrowserSourceToOnlineImportCards(cards, inherited);
+  return {
+    ok: true,
+    cards: finalCards,
+    message: `已提取 ${finalCards.length} 张卡片`
+  };
 }
 
 async function runBrowserCommand(command, payload = {}) {
@@ -1711,6 +2659,15 @@ async function runBrowserCommand(command, payload = {}) {
   }
   if (command === 'refresh-card-cookies') {
     return refreshCardCookies(payload.card || JSON.parse(payload.cardJson || '{}'), cfg);
+  }
+  if (command === 'rewrite-card-cookies') {
+    return rewriteBrowserCardCookies(payload.card || JSON.parse(payload.cardJson || '{}'), cfg);
+  }
+  if (command === 'online-import-list-targets') {
+    return { ok: true, results: await listOnlineImportTargets(cfg) };
+  }
+  if (command === 'online-import-capture') {
+    return onlineImportCapture(cfg, payload);
   }
   throw new Error(`未知命令: ${command}`);
 }

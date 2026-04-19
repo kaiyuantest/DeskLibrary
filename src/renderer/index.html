@@ -394,7 +394,7 @@
         </div>
 
         <div class="modal-actions">
-          <button id="browserCardOpenBtn" class="text-action" type="button">一键打开</button>
+          <button id="browserCardOpenBtn" class="text-action" type="button" title="浏览器已运行时仅导航，不覆盖当前登录">一键打开</button>
           <button id="browserCardInjectBtn" class="text-action" type="button">Cookie 转移</button>
           <button id="browserCardOpenSourceBtn" class="text-action" type="button">打开来源目录</button>
           <button id="browserCardSaveBtn" class="text-action" type="button">保存修改</button>
@@ -451,6 +451,43 @@
 
         <div class="modal-actions">
           <button id="browserInjectConfirmBtn" class="save-pill compact" type="button">开始转移</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="browserOnlineImportModal" class="modal hidden">
+      <div id="browserOnlineImportModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card browser-inject-modal-card">
+        <div class="modal-head">
+          <div>
+            <div class="modal-title">在线导入 Cookie</div>
+            <div id="browserOnlineImportStatus" class="modal-subline">请选择目标并填写账号名称</div>
+          </div>
+          <button id="closeBrowserOnlineImportModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+        <div class="browser-inject-actions">
+          <button id="browserOnlineImportRefreshBtn" class="text-action" type="button">刷新目标列表</button>
+        </div>
+        <div class="modal-body browser-inject-modal-body browser-online-import-modal-body">
+          <section class="browser-inject-panel">
+            <div class="section-head compact">
+              <span>目标浏览器</span>
+            </div>
+            <label class="control-card asset-search-card browser-import-config-card browser-online-import-field">
+              <span class="control-label">选择实例</span>
+              <select id="browserOnlineImportTargetSelect" class="search-input"></select>
+            </label>
+            <label class="control-card asset-search-card browser-import-config-card browser-online-import-field">
+              <span class="control-label">账号名称（写入卡片名称）</span>
+              <input id="browserOnlineImportAccountInput" class="search-input" type="text" placeholder="例如：工作号主账号" />
+            </label>
+            <p class="minor-text browser-online-import-hint">
+              目标须已开启远程调试（自建环境需带 <code>--remote-debugging-port</code>）。应用会扫描本机约 9000–10000 端口的调试服务；浏览器保持打开时通过 CDP 读取，无需复制本地 Cookie 库。比特浏览器仍依赖本地 API 配置。从某分组进入时，新卡片会归入该分组（与 CDP 读取用的调试端口无关）。
+            </p>
+          </section>
+        </div>
+        <div class="modal-actions">
+          <button id="browserOnlineImportSubmitBtn" class="save-pill compact" type="button">立即提取并导入</button>
         </div>
       </section>
     </div>

@@ -132,7 +132,15 @@ class StorageService {
       userDataDir: rawBrowserSource.userDataDir || rawBrowserSource.user_data_dir || '',
       browserId: rawBrowserSource.browserId || rawBrowserSource.browser_id || '',
       label: rawBrowserSource.label || '',
-      name: rawBrowserSource.name || ''
+      name: rawBrowserSource.name || '',
+      port: (() => {
+        const raw = rawBrowserSource.port ?? rawBrowserSource.debugPort ?? rawBrowserSource.debug_port;
+        if (raw === undefined || raw === null || raw === '') {
+          return 0;
+        }
+        const n = Number(raw);
+        return Number.isFinite(n) ? n : 0;
+      })()
     };
     const sourceLabel = browserSource.label
       || browserSource.displayName
