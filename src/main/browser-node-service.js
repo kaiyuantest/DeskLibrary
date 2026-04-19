@@ -1212,6 +1212,26 @@ async function runCdpScript(payload) {
     "  $script:msgId=0",
     "  [void](Send-Cdp 'Network.enable' @{})",
     "  [void](Send-Cdp 'Page.enable' @{})",
+    "  $domains=New-Object System.Collections.Generic.HashSet[string]",
+    "  foreach($cookie in $cookies){",
+    "    if($cookie.domain){ [void]$domains.Add([string]$cookie.domain) }",
+    "  }",
+    "  foreach($domain in $domains){",
+    "    $getAllResp=Send-Cdp 'Network.getAllCookies' @{}",
+    "    if($getAllResp.result -and $getAllResp.result.cookies){",
+    "      foreach($existingCookie in $getAllResp.result.cookies){",
+    "        $existingDomain=[string]$existingCookie.domain",
+    "        if($existingDomain -eq $domain -or $existingDomain -eq ('.' + $domain.TrimStart('.')) -or ('.' + $existingDomain.TrimStart('.')) -eq $domain){",
+    "          $deleteParams=@{",
+    "            name=[string]$existingCookie.name;",
+    "            domain=$existingDomain",
+    "          }",
+    "          if($existingCookie.path){ $deleteParams.path=[string]$existingCookie.path }",
+    "          [void](Send-Cdp 'Network.deleteCookies' $deleteParams)",
+    "        }",
+    "      }",
+    "    }",
+    "  }",
     "  $ok=0",
     "  $fail=0",
     "  $errors=New-Object System.Collections.Generic.List[string]",
@@ -1308,6 +1328,24 @@ async function dbWriteCookies(cookieDbPath, cookies, userDataDir) {
   try {
     fs.copyFileSync(cookieDbPath, tempDb);
     const statements = ['BEGIN TRANSACTION;'];
+    
+    // 收集所有需要清理的域名
+    const domainsToClean = new Set();
+    for (const cookie of normalized) {
+      domainsToClean.add(cookie.domain);
+      // 也添加带点和不带点的变体
+      const trimmed = cookie.domain.replace(/^\.+/, '');
+      if (trimmed) {
+        domainsToClean.add(trimmed);
+        domainsToClean.add(`.${trimmed}`);
+      }
+    }
+    
+    // 先删除这些域名下的所有旧 Cookie
+    for (const domain of domainsToClean) {
+      statements.push(`DELETE FROM cookies WHERE host_key='${escapeSqlText(domain)}';`);
+    }
+    
     let count = 0;
     for (const cookie of normalized) {
       const encryptedValue = encryptCookieValue(masterKey, cookie.value);
@@ -1332,9 +1370,7 @@ async function dbWriteCookies(cookieDbPath, cookies, userDataDir) {
         top_frame_site_key: `'${escapeSqlText(cookie.topFrameSiteKey || '')}'`,
         has_cross_site_ancestor: cookie.hasCrossSiteAncestor ? '1' : '0'
       };
-      statements.push(
-        `DELETE FROM cookies WHERE host_key='${escapeSqlText(cookie.domain)}' AND name='${escapeSqlText(cookie.name)}' AND path='${escapeSqlText(cookie.path || '/')}';`
-      );
+      // 不再需要逐个删除，因为已经在前面批量删除了整个域名的 Cookie
       const insertColumns = Object.keys(valuesMap).filter((key) => columns.has(key));
       const insertValues = insertColumns.map((key) => valuesMap[key]);
       statements.push(`INSERT INTO cookies (${insertColumns.join(',')}) VALUES (${insertValues.join(',')});`);
