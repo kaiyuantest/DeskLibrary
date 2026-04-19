@@ -1220,16 +1220,9 @@ async function runCdpScript(payload) {
     "    $targetName=[string]$cookie.name",
     "    $targetPath=if($cookie.path){ [string]$cookie.path } else { '/' }",
     "    foreach($existing in $existingCookies){",
-    "      $existingDomain=[string]$existing.domain",
-    "      $existingName=[string]$existing.name",
-    "      $existingPath=if($existing.path){ [string]$existing.path } else { '/' }",
-    "      $domainMatch=$false",
-    "      if($existingDomain -eq $targetDomain){ $domainMatch=$true }",
-    "      elseif($existingDomain -eq ('.' + $targetDomain.TrimStart('.'))){ $domainMatch=$true }",
-    "      elseif(('.' + $existingDomain.TrimStart('.')) -eq $targetDomain){ $domainMatch=$true }",
-    "      if($domainMatch -and $existingName -eq $targetName -and $existingPath -eq $targetPath){",
-    "        $deleteParams=@{ name=$existingName; domain=$existingDomain }",
-    "        if($existingPath){ $deleteParams.path=$existingPath }",
+    "      if(([string]$existing.domain -eq $targetDomain) -and ([string]$existing.name -eq $targetName) -and (([string]$existing.path -eq $targetPath) -or ((-not $existing.path -or $existing.path -eq '') -and $targetPath -eq '/'))){",
+    "        $deleteParams=@{ name=[string]$existing.name; domain=[string]$existing.domain }",
+    "        if($existing.path){ $deleteParams.path=[string]$existing.path }",
     "        [void](Send-Cdp 'Network.deleteCookies' $deleteParams)",
     "      }",
     "    }",
@@ -1354,18 +1347,10 @@ async function dbWriteCookies(cookieDbPath, cookies, userDataDir) {
         top_frame_site_key: `'${escapeSqlText(cookie.topFrameSiteKey || '')}'`,
         has_cross_site_ancestor: cookie.hasCrossSiteAncestor ? '1' : '0'
       };
-      // 只删除我们要替换的这个具体的 Cookie（精确匹配 domain + name + path）
-      const domainVariants = [cookie.domain];
-      const trimmed = cookie.domain.replace(/^\.+/, '');
-      if (trimmed && trimmed !== cookie.domain) {
-        domainVariants.push(trimmed);
-        domainVariants.push(`.${trimmed}`);
-      }
-      for (const domainVariant of domainVariants) {
-        statements.push(
-          `DELETE FROM cookies WHERE host_key='${escapeSqlText(domainVariant)}' AND name='${escapeSqlText(cookie.name)}' AND path='${escapeSqlText(cookie.path || '/')}';`
-        );
-      }
+      // 精确删除：只删除 domain + name + path 完全匹配的 Cookie
+      statements.push(
+        `DELETE FROM cookies WHERE host_key='${escapeSqlText(cookie.domain)}' AND name='${escapeSqlText(cookie.name)}' AND path='${escapeSqlText(cookie.path || '/')}';`
+      );
       const insertColumns = Object.keys(valuesMap).filter((key) => columns.has(key));
       const insertValues = insertColumns.map((key) => valuesMap[key]);
       statements.push(`INSERT INTO cookies (${insertColumns.join(',')}) VALUES (${insertValues.join(',')});`);
