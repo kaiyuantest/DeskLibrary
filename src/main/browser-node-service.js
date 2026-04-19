@@ -824,7 +824,7 @@ async function loadOfflineGroups(cfg, sourceType, sourceId, filterAuth, mergeDom
   return buildGroupsFromCookies(finalCookies, mergeDomain !== false);
 }
 
-async function loadSourceCookies(cfg, sourceType, sourceId) {
+async function loadSourceCookies(cfg, sourceType, sourceId, options = {}) {
   if (sourceType === 'chrome_profile') {
     const [userDataDir, profileName] = String(sourceId || '').split('::');
     const profileDir = profileName ? path.join(userDataDir, profileName) : '';
@@ -835,18 +835,14 @@ async function loadSourceCookies(cfg, sourceType, sourceId) {
     return readCookiesFromDb(cookiePath, userDataDir);
   }
   if (sourceType === 'self_built') {
-    // 检查浏览器是否正在运行
-    const port = extractPortFromUserDataDir(sourceId);
-    if (port && await isPortOpen(port)) {
-      // 浏览器正在运行，使用 CDP 读取
-      try {
-        return await readCookiesViaCdp(port);
-      } catch (error) {
-        // CDP 读取失败，降级到数据库读取
-        console.warn('CDP 读取失败，降级到数据库读取:', error.message);
-      }
+    const explicitPort = Number(options.debugPort || options.port || 0);
+    const preferredDomain = String(options.preferredDomain || '').trim();
+    const cdpPort = await resolveSelfBuiltCdpPort(String(sourceId || ''), explicitPort);
+    if (cdpPort) {
+      // 浏览器正在运行：必须使用 CDP 读取（数据库文件被锁定）
+      return await readCookiesViaCdp(cdpPort, preferredDomain);
     }
-    // 浏览器未运行或 CDP 失败，从数据库读取
+    // 浏览器未运行，从数据库读取
     const cookiePath = getCookiePath(sourceId);
     if (!cookiePath) {
       throw new Error('找不到自建浏览器 Cookie 文件');
@@ -863,6 +859,96 @@ function extractPortFromUserDataDir(userDataDir) {
   // 从路径中提取端口号，例如 chrome_user_data_port_9222 -> 9222
   const match = String(userDataDir || '').match(/port[_-](\d+)/i);
   return match ? Number(match[1]) : 0;
+}
+
+function pathsEqualWin(a, b) {
+  const left = String(a || '').trim();
+  const right = String(b || '').trim();
+  if (!left || !right) {
+    return false;
+  }
+  try {
+    return path.normalize(path.resolve(left)).toLowerCase() === path.normalize(path.resolve(right)).toLowerCase();
+  } catch {
+    return false;
+  }
+}
+
+/** 与 cookie_manager browser.scan_chrome_debug_ports 一致：用 CDP /json/version 取 userDataDir */
+async function getUserDataDirFromDebugPort(port) {
+  try {
+    const payload = await fetchJson(`http://127.0.0.1:${port}/json/version`, {}, 1500);
+    return String(payload?.data?.userDataDir || '').trim();
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * 与 cookie_manager v5 在线导入一致：在常用调试端口段内扫描，用 userDataDir 匹配当前 Chrome 实例。
+ * Chromedriver 使用任意 --user-data-dir（如 E:\\...\\test）时，卡片上可能没有正确 port，仅靠路径无法推断。
+ */
+async function findDebugPortForUserDataDir(expectedUserDataDir, portHint = 0) {
+  const expected = String(expectedUserDataDir || '').trim();
+  if (!expected) {
+    return 0;
+  }
+  const tryMatch = async (p) => {
+    if (!p || !(await isPortOpen(p))) {
+      return 0;
+    }
+    const udd = await getUserDataDirFromDebugPort(p);
+    return pathsEqualWin(udd, expected) ? p : 0;
+  };
+  const hint = Number(portHint || 0);
+  if (hint > 0) {
+    const hit = await tryMatch(hint);
+    if (hit) {
+      return hit;
+    }
+  }
+  // range(9200, 9260) 与参考项目 scan_chrome_debug_ports 一致
+  for (let p = 9200; p < 9260; p += 1) {
+    if (p === hint) {
+      continue;
+    }
+    const hit = await tryMatch(p);
+    if (hit) {
+      return hit;
+    }
+  }
+  return 0;
+}
+
+/**
+ * 解析用于 CDP 的端口：优先「端口 + /json/version 的 userDataDir」与卡片一致；否则扫描端口段。
+ */
+async function resolveSelfBuiltCdpPort(userDataDir, explicitPort) {
+  const udd = String(userDataDir || '').trim();
+  const hint = Number(explicitPort || 0);
+  if (udd) {
+    const found = await findDebugPortForUserDataDir(udd, hint);
+    if (found) {
+      return found;
+    }
+  }
+  if (hint > 0 && (await isPortOpen(hint))) {
+    if (!udd) {
+      return hint;
+    }
+    const verUdd = await getUserDataDirFromDebugPort(hint);
+    if (pathsEqualWin(verUdd, udd)) {
+      return hint;
+    }
+  }
+  const fromPath = extractPortFromUserDataDir(udd);
+  if (fromPath && (await isPortOpen(fromPath))) {
+    const verUdd = await getUserDataDirFromDebugPort(fromPath);
+    if (!udd || pathsEqualWin(verUdd, udd)) {
+      return fromPath;
+    }
+  }
+  return 0;
 }
 
 function getCardSourceIdentity(card) {
@@ -891,9 +977,24 @@ function getCardSourceIdentity(card) {
   throw new Error(`暂不支持刷新该来源类型: ${type || 'unknown'}`);
 }
 
+function cardPreferredDomainForCdp(card) {
+  const rawUrl = String(card?.openUrl || card?.open_url || '').trim();
+  if (/^https?:\/\//i.test(rawUrl)) {
+    try {
+      return new URL(rawUrl).hostname;
+    } catch {}
+  }
+  return String(card?.domain || '').trim().replace(/^\./, '');
+}
+
 async function refreshCardCookies(card, cfg) {
   const { sourceType, sourceId } = getCardSourceIdentity(card);
-  const normalizedCookies = ensureArray(await loadSourceCookies(cfg, sourceType, sourceId))
+  const source = card?.browserSource || card?.browser_source || {};
+  const debugPort = Number(source?.port || source?.debugPort || 0);
+  const preferredDomain = cardPreferredDomainForCdp(card);
+  const normalizedCookies = ensureArray(
+    await loadSourceCookies(cfg, sourceType, sourceId, { debugPort, preferredDomain })
+  )
     .map((item) => normalizeCookie(item))
     .filter(Boolean);
   const targetDomain = String(card?.domain || '').trim().toLowerCase();
@@ -1193,7 +1294,7 @@ async function runCdpScript(payload) {
     "  }",
     "  return ''",
     "}",
-    "function Invoke-SetCookie($params){",
+    "function Invoke-SetCookie($params,$cookieObj){",
     "  $lastError=''",
     "  $attempts=New-Object System.Collections.Generic.List[hashtable]",
     "  $attempts.Add((Copy-Map $params))",
@@ -1211,6 +1312,13 @@ async function runCdpScript(payload) {
     "  }",
     "  $urlOnly=Remove-Keys $reduced @('domain','sameSite')",
     "  $attempts.Add($urlOnly)",
+    "  if($cookieObj -and $cookieObj.url){",
+    "    $pureUrl=@{ name=[string]$params.name;value=[string]$params.value;path=[string]$params.path;secure=[bool]$params.secure;httpOnly=[bool]$params.httpOnly }",
+    "    if($params.expires){ $pureUrl.expires=[double]$params.expires }",
+    "    if($cookieObj.sameSite){ $pureUrl.sameSite=[string]$cookieObj.sameSite }",
+    "    $pureUrl.url=[string]$cookieObj.url",
+    "    $attempts.Add($pureUrl)",
+    "  }",
     "  foreach($attempt in $attempts){",
     "    if(((-not $attempt.ContainsKey('domain')) -or (-not [string]$attempt.domain)) -and ((-not $attempt.ContainsKey('url')) -or (-not [string]$attempt.url))){ continue }",
     "    $resp=Send-Cdp 'Network.setCookie' $attempt",
@@ -1258,14 +1366,14 @@ async function runCdpScript(payload) {
     "      secure=[bool]$cookie.secure;",
     "      httpOnly=[bool]$cookie.httpOnly",
     "    }",
-    "    if($cookie.url){ $params.url=[string]$cookie.url }",
     "    if($cookie.domain){ $params.domain=[string]$cookie.domain }",
+    "    elseif($cookie.url){ $params.url=[string]$cookie.url }",
     "    if($cookie.expiry){ $params.expires=[double]$cookie.expiry }",
     "    if($cookie.sameSite){ $params.sameSite=[string]$cookie.sameSite }",
     "    if($cookie.sourceScheme -ne $null -and $cookie.sourceScheme -ne ''){ $params.sourceScheme=[string]$cookie.sourceScheme }",
     "    if($cookie.sourcePort -ne $null -and $cookie.sourcePort -ne '' -and [int]$cookie.sourcePort -ge 0){ $params.sourcePort=[int]$cookie.sourcePort }",
     "    if($cookie.isPartitioned -and $cookie.topFrameSiteKey){ $params.partitionKey=@{topLevelSite=[string]$cookie.topFrameSiteKey} }",
-    "    $setResult=Invoke-SetCookie $params",
+    "    $setResult=Invoke-SetCookie $params $cookie",
     "    if($setResult.success){",
     "      $ok++",
     "    } else {",
@@ -1517,8 +1625,11 @@ async function defaultOpen(card, cfg) {
     return { ok, message: ok ? '已用系统 Chrome 打开' : '未找到系统 Chrome' };
   }
   if (srcType === 'self_built') {
-    const port = Number(source.port || 0);
+    let port = Number(source.port || 0);
     const userDataDir = String(source.userDataDir || source.user_data_dir || '');
+    if (!port && userDataDir) {
+      port = extractPortFromUserDataDir(userDataDir);
+    }
     const running = port ? await isPortOpen(port) : false;
     
     // 如果浏览器未运行，直接启动，不写入 Cookie
@@ -1610,8 +1721,13 @@ async function injectToTarget(card, target, method, cfg) {
     return { ok: true, message: `已写入 ${writeResult.count} 条 Cookie，重启目标浏览器后生效` };
   }
 
+  if (type === 'self_built' && !port && userDataDir) {
+    port = extractPortFromUserDataDir(userDataDir);
+  }
   if (type === 'self_built' && !port) {
-    port = Number(target?.port || 0);
+    return { ok: false, message: '目标为自建浏览器但未指定调试端口，且用户目录路径中无法解析端口（请确认目录名为 chrome_user_data_port_端口 或在目标中填写端口）' };
+  }
+  if (type === 'self_built' && port && !(await isPortOpen(port))) {
     const launchError = await launchSelfBuiltBrowser(port, userDataDir, '', cfg);
     if (launchError) {
       return { ok: false, message: launchError };
