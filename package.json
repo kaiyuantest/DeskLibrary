@@ -1,7 +1,7 @@
 {
-  "name": "click2save-electron",
+  "name": "desklibrary-electron",
   "version": "1.0.0",
-  "description": "Click2Save Electron desktop app",
+  "description": "DeskLibrary — desktop collection workbench (Electron)",
   "main": "src/main/index.js",
   "author": "OpenAI Codex",
   "license": "UNLICENSED",
@@ -12,8 +12,8 @@
     "dist": "electron-builder"
   },
   "build": {
-    "appId": "com.click2save.desktop",
-    "productName": "Click2Save",
+    "appId": "com.desklibrary.desktop",
+    "productName": "DeskLibrary",
     "directories": {
       "output": "release"
     },

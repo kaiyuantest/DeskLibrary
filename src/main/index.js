@@ -16,7 +16,6 @@ try {
   uIOhook = null;
 }
 
-const HOTKEY_ALT_Q = 'Alt+Q';
 const OBSERVE_WINDOW_MS = 1500;
 const COPY_SHORTCUT_POLL_DELAY_MS = 120;
 const COPY_SHORTCUT_MAX_RETRIES = 15;
@@ -76,6 +75,7 @@ let mainWindowDockMode = 'visible';
 let mainWindowDockCache = null;
 let mainWindowHideTimer = null;
 let hoverSyncTimer = null;
+let registeredGlobalAccelerators = [];
 
 function getLoginItemConfig(enabled) {
   const base = {
@@ -510,7 +510,7 @@ function createFloatingWindow() {
 
 function createTray() {
   tray = new Tray(createTrayIcon());
-  tray.setToolTip('Click2Save');
+  tray.setToolTip('DeskLibrary');
   const menu = Menu.buildFromTemplate([
     { label: '打开主界面', click: () => showWindow() },
     { type: 'separator' },
@@ -852,18 +852,18 @@ function readForegroundWindowViaPowerShell() {
     'using System;',
     'using System.Runtime.InteropServices;',
     'using System.Text;',
-    'public static class Click2SaveNative {',
+    'public static class DeskLibraryNative {',
     '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
     '  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int count);',
     '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);',
     '}',
     '\'@',
-    '$hwnd = [Click2SaveNative]::GetForegroundWindow()',
+    '$hwnd = [DeskLibraryNative]::GetForegroundWindow()',
     'if ($hwnd -eq [IntPtr]::Zero) { return }',
     '$titleBuilder = New-Object System.Text.StringBuilder 1024',
-    '[void][Click2SaveNative]::GetWindowText($hwnd, $titleBuilder, $titleBuilder.Capacity)',
+    '[void][DeskLibraryNative]::GetWindowText($hwnd, $titleBuilder, $titleBuilder.Capacity)',
     '$pid = 0',
-    '[void][Click2SaveNative]::GetWindowThreadProcessId($hwnd, [ref]$pid)',
+    '[void][DeskLibraryNative]::GetWindowThreadProcessId($hwnd, [ref]$pid)',
     '$process = Get-Process -Id $pid -ErrorAction SilentlyContinue',
     '$processName = ""',
     '$processPath = ""',
@@ -893,15 +893,15 @@ function readForegroundWindowViaPidOnly() {
     'Add-Type @\'',
     'using System;',
     'using System.Runtime.InteropServices;',
-    'public static class Click2SavePidOnly {',
+    'public static class DeskLibraryPidOnly {',
     '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
     '  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);',
     '}',
     '\'@',
-    '$hwnd = [Click2SavePidOnly]::GetForegroundWindow()',
+    '$hwnd = [DeskLibraryPidOnly]::GetForegroundWindow()',
     'if ($hwnd -eq [IntPtr]::Zero) { return }',
     '$pid = 0',
-    '[void][Click2SavePidOnly]::GetWindowThreadProcessId($hwnd, [ref]$pid)',
+    '[void][DeskLibraryPidOnly]::GetWindowThreadProcessId($hwnd, [ref]$pid)',
     '$process = Get-Process -Id $pid -ErrorAction SilentlyContinue',
     '[pscustomobject]@{',
     '  processName = if ($process) { [string]$process.ProcessName } else { "" }',
@@ -1099,7 +1099,7 @@ function requestUrlStatus(targetUrl) {
       method: 'GET',
       timeout: 8000,
       headers: {
-        'User-Agent': 'Click2Save/1.0',
+        'User-Agent': 'DeskLibrary/1.0',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
       }
     }, (res) => {
@@ -1177,14 +1177,14 @@ function processPayload(payload, method, statusLabel, options = {}) {
         nextUpdates.category = 'common';
       }
       storage.touchRecord(duplicate.id, nextUpdates);
-      notify('Click2Save', category === 'common' ? '已加入常用' : '已命中现有收藏');
+      notify('DeskLibrary', category === 'common' ? '已加入常用' : '已命中现有收藏');
       sendSnapshot(category === 'common' ? '已加入常用' : '已更新现有收藏');
       return;
     }
     if (storage.shouldNotifyDuplicate(duplicate.id)) {
       storage.touchRecord(duplicate.id, nextUpdates);
       storage.markDuplicateNotified(duplicate.id);
-      notify('Click2Save', '内容已存在');
+      notify('DeskLibrary', '内容已存在');
     } else {
       storage.touchRecord(duplicate.id, nextUpdates);
     }
@@ -1197,7 +1197,7 @@ function processPayload(payload, method, statusLabel, options = {}) {
     sourceApp: sourceContext.sourceApp,
     windowTitle: sourceContext.windowTitle
   });
-  notify('Click2Save', '已收藏');
+  notify('DeskLibrary', '已收藏');
   sendSnapshot(statusLabel || '收藏成功');
   sendFloatingMenuState();
 }
@@ -1603,21 +1603,81 @@ function setupClipboardPolling() {
   }, 300);
 }
 
-function setupGlobalShortcuts() {
-  globalShortcut.register(HOTKEY_ALT_Q, () => {
-    const settings = getSettings();
-    if (!settings.altQEnabled) return;
-    altQFlowActive = true;
-    ignoreNextClipboardChange = true;
-    const sourceContext = getForegroundWindowContext();
-    const payload = readClipboardPayload();
-    if (payload) {
-      processPayload(payload, 'hotkey_alt_q', 'Alt+Q 已收藏', { sourceContext });
-    }
-    setTimeout(() => {
-      altQFlowActive = false;
-    }, 100);
+function unregisterTrackedGlobalShortcuts() {
+  registeredGlobalAccelerators.forEach((acc) => {
+    try {
+      globalShortcut.unregister(acc);
+    } catch {}
   });
+  registeredGlobalAccelerators = [];
+}
+
+function registerGlobalAccelerator(accelerator, handler) {
+  const acc = String(accelerator || '').trim();
+  if (!acc) return false;
+  try {
+    if (globalShortcut.register(acc, handler)) {
+      registeredGlobalAccelerators.push(acc);
+      return true;
+    }
+  } catch {}
+  return false;
+}
+
+function refreshGlobalShortcuts() {
+  unregisterTrackedGlobalShortcuts();
+  const settings = getSettings();
+
+  const altQAcc = String(settings.altQShortcut || 'Alt+Q').trim() || 'Alt+Q';
+  if (settings.altQEnabled) {
+    registerGlobalAccelerator(altQAcc, () => {
+      const s = getSettings();
+      if (!s.altQEnabled) return;
+      altQFlowActive = true;
+      ignoreNextClipboardChange = true;
+      const sourceContext = getForegroundWindowContext();
+      const payload = readClipboardPayload();
+      const label = String(s.altQShortcut || 'Alt+Q').trim() || 'Alt+Q';
+      if (payload) {
+        processPayload(payload, 'hotkey_alt_q', `${label} 已收藏`, { sourceContext });
+      }
+      setTimeout(() => {
+        altQFlowActive = false;
+      }, 100);
+    });
+  }
+
+  const del = String(settings.deleteLastCaptureShortcut || '').trim();
+  if (settings.hotkeyDeleteLastEnabled !== false && del) {
+    registerGlobalAccelerator(del, () => {
+      if (getSettings().hotkeyDeleteLastEnabled === false) return;
+      deleteLastCapture();
+    });
+  }
+
+  const startAcc = String(settings.accumulationStartShortcut || '').trim();
+  if (settings.hotkeyStartAccumEnabled !== false && startAcc) {
+    registerGlobalAccelerator(startAcc, () => {
+      if (getSettings().hotkeyStartAccumEnabled === false) return;
+      startAccumulation();
+    });
+  }
+
+  const finishAcc = String(settings.accumulationFinishShortcut || '').trim();
+  if (settings.hotkeyFinishAccumEnabled !== false && finishAcc) {
+    registerGlobalAccelerator(finishAcc, () => {
+      if (getSettings().hotkeyFinishAccumEnabled === false) return;
+      finishAccumulation();
+    });
+  }
+
+  const undoAcc = String(settings.accumulationUndoShortcut || '').trim();
+  if (settings.hotkeyUndoAccumEnabled && undoAcc) {
+    registerGlobalAccelerator(undoAcc, () => {
+      if (!getSettings().hotkeyUndoAccumEnabled) return;
+      undoAccumulation();
+    });
+  }
 }
 
 function normalizeConfiguredKey(value) {
@@ -1632,6 +1692,7 @@ function applySystemSettings(settings) {
   syncStartupSettingFromSystem();
   syncFloatingWindowVisibility();
   syncMainWindowDockVisibility();
+  refreshGlobalShortcuts();
 }
 
 function syncHoverStateFromCursor() {
@@ -2439,6 +2500,22 @@ function setupIpc() {
     return { ok: !!result };
   });
 
+  ipcMain.handle('open-external-url', async (_, url) => {
+    const raw = String(url || '').trim();
+    if (!/^https?:\/\//i.test(raw)) {
+      return { ok: false, message: '仅支持 http(s) 链接' };
+    }
+    try {
+      await shell.openExternal(raw);
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '无法打开链接'
+      };
+    }
+  });
+
   ipcMain.handle('open-main-window', async () => {
     if (!mainWindow || mainWindow.isDestroyed()) {
       return { ok: false };
@@ -2613,13 +2690,13 @@ function setupIpc() {
 }
 
 app.whenReady().then(() => {
+  app.setName('DeskLibrary');
   storage = new StorageService(app.getPath('userData'));
   syncStartupSettingFromSystem();
   setupIpc();
   createWindow();
   createFloatingWindow();
   createTray();
-  setupGlobalShortcuts();
   setupClipboardPolling();
   setupKeyboardListener();
   setupHoverSync();

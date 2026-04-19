@@ -40,9 +40,15 @@ class StorageService {
       doubleCopyEnabled: true,
       copyThenKeyEnabled: true,
       postCopyKey: 'Shift',
+      altQShortcut: 'Alt+Q',
+      hotkeyDeleteLastEnabled: true,
+      hotkeyStartAccumEnabled: true,
+      hotkeyFinishAccumEnabled: true,
+      hotkeyUndoAccumEnabled: false,
       accumulationStartShortcut: 'Ctrl+Alt+A',
       accumulationFinishShortcut: 'Ctrl+Alt+S',
       accumulationCancelShortcut: 'Ctrl+Alt+X',
+      accumulationUndoShortcut: '',
       deleteLastCaptureShortcut: 'Ctrl+Alt+Z',
       startupLaunchEnabled: false,
       floatingIconEnabled: false,
@@ -206,9 +212,15 @@ class StorageService {
       doubleCopyEnabled: true,
       copyThenKeyEnabled: true,
       postCopyKey: 'Shift',
+      altQShortcut: 'Alt+Q',
+      hotkeyDeleteLastEnabled: true,
+      hotkeyStartAccumEnabled: true,
+      hotkeyFinishAccumEnabled: true,
+      hotkeyUndoAccumEnabled: false,
       accumulationStartShortcut: 'Ctrl+Alt+A',
       accumulationFinishShortcut: 'Ctrl+Alt+S',
       accumulationCancelShortcut: 'Ctrl+Alt+X',
+      accumulationUndoShortcut: '',
       deleteLastCaptureShortcut: 'Ctrl+Alt+Z',
       startupLaunchEnabled: false,
       floatingIconEnabled: false,
@@ -313,7 +325,7 @@ class StorageService {
       signature: text
     }, 'manual', {
       category: 'daily',
-      sourceApp: 'Click2Save',
+      sourceApp: 'DeskLibrary',
       windowTitle: '手动新增'
     });
   }

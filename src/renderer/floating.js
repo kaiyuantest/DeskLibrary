@@ -73,13 +73,13 @@ window.addEventListener('mousemove', async (event) => {
   }
   if (!dragging && passedThreshold) {
     dragging = true;
-    await window.click2saveFloating.startDrag({
+    await window.deskLibraryFloating.startDrag({
       offsetX: dragOffset?.offsetX || 0,
       offsetY: dragOffset?.offsetY || 0
     });
   }
   if (!dragging) return;
-  await window.click2saveFloating.dragMove({
+  await window.deskLibraryFloating.dragMove({
     screenX: event.screenX,
     screenY: event.screenY
   });
@@ -88,7 +88,7 @@ window.addEventListener('mousemove', async (event) => {
 window.addEventListener('mouseup', async () => {
   if (dragging) {
     dragging = false;
-    await window.click2saveFloating.endDrag();
+    await window.deskLibraryFloating.endDrag();
   }
   startPoint = null;
   dragOffset = null;
@@ -102,7 +102,7 @@ button.addEventListener('click', async () => {
   if (togglePending) return;
   togglePending = true;
   try {
-    await window.click2saveFloating.toggleMenu();
+    await window.deskLibraryFloating.toggleMenu();
   } finally {
     setTimeout(() => {
       togglePending = false;
@@ -111,61 +111,61 @@ button.addEventListener('click', async () => {
 });
 
 openMainWindowBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.openMainWindow();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.openMainWindow();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 quickSaveBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.quickSave();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.quickSave();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 quickCommonBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.quickSaveCommon();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.quickSaveCommon();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 deleteLastCaptureBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.deleteLastCapture();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.deleteLastCapture();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 startAccumulationBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.startAccumulation();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.startAccumulation();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 finishAccumulationBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.finishAccumulation();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.finishAccumulation();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 undoAccumulationBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.undoAccumulation();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.undoAccumulation();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 cancelAccumulationBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.cancelAccumulation();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.cancelAccumulation();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 hideFloatingBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.disableFloatingIcon();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.disableFloatingIcon();
+  await window.deskLibraryFloating.closeMenu();
 });
 
 window.addEventListener('keydown', async (event) => {
   if (event.key === 'Escape' && menuOpen) {
-    await window.click2saveFloating.closeMenu();
+    await window.deskLibraryFloating.closeMenu();
   }
 });
 
 window.addEventListener('blur', async () => {
   if (menuOpen) {
-    await window.click2saveFloating.closeMenu();
+    await window.deskLibraryFloating.closeMenu();
   }
 });
 
-window.click2saveFloating.onMenuState(renderMenuState);
-window.click2saveFloating.getMenuState().then(renderMenuState).catch(() => {});
+window.deskLibraryFloating.onMenuState(renderMenuState);
+window.deskLibraryFloating.getMenuState().then(renderMenuState).catch(() => {});

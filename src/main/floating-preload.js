@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('click2saveFloating', {
+contextBridge.exposeInMainWorld('deskLibraryFloating', {
   openMainWindow: () => ipcRenderer.invoke('open-main-window'),
   toggleMenu: () => ipcRenderer.invoke('floating-toggle-menu'),
   closeMenu: () => ipcRenderer.invoke('floating-close-menu'),

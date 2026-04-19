@@ -43,7 +43,7 @@ def query_cookie_rows(cookie_path: Path):
         finally:
             conn.close()
     except Exception:
-        tmp_dir = Path(tempfile.mkdtemp(prefix="click2save-cookie-scan-"))
+        tmp_dir = Path(tempfile.mkdtemp(prefix="desklibrary-cookie-scan-"))
         tmp_file = tmp_dir / "Cookies.db"
         try:
             shutil.copy2(cookie_path, tmp_file)

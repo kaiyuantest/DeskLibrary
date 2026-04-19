@@ -13,7 +13,7 @@ const els = {
 };
 
 async function refreshState() {
-  const payload = await window.click2saveFloating.getMenuState();
+  const payload = await window.deskLibraryFloating.getMenuState();
   const settings = payload?.settings || {};
   els.observeStatus.textContent = payload?.observeStatus || '等待下一次复制';
   els.autoJudgmentEnabled.checked = !!settings.autoJudgmentEnabled;
@@ -24,26 +24,26 @@ async function refreshState() {
 }
 
 async function updateSetting(key, value) {
-  await window.click2saveFloating.updateSetting({ key, value });
+  await window.deskLibraryFloating.updateSetting({ key, value });
   await refreshState();
 }
 
-els.closeMenuBtn.addEventListener('click', () => window.click2saveFloating.closeMenu());
+els.closeMenuBtn.addEventListener('click', () => window.deskLibraryFloating.closeMenu());
 els.openMainBtn.addEventListener('click', async () => {
-  await window.click2saveFloating.openMainWindow();
-  await window.click2saveFloating.closeMenu();
+  await window.deskLibraryFloating.openMainWindow();
+  await window.deskLibraryFloating.closeMenu();
 });
-els.collectNowBtn.addEventListener('click', () => window.click2saveFloating.collectNow({ category: 'daily' }));
-els.collectCommonBtn.addEventListener('click', () => window.click2saveFloating.collectNow({ category: 'common' }));
+els.collectNowBtn.addEventListener('click', () => window.deskLibraryFloating.collectNow({ category: 'daily' }));
+els.collectCommonBtn.addEventListener('click', () => window.deskLibraryFloating.collectNow({ category: 'common' }));
 els.autoJudgmentEnabled.addEventListener('change', (event) => updateSetting('autoJudgmentEnabled', event.target.checked));
 els.doubleCopyEnabled.addEventListener('change', (event) => updateSetting('doubleCopyEnabled', event.target.checked));
 els.copyThenKeyEnabled.addEventListener('change', (event) => updateSetting('copyThenKeyEnabled', event.target.checked));
 els.dockToEdgeEnabled.addEventListener('change', (event) => updateSetting('dockToEdgeEnabled', event.target.checked));
-els.quitBtn.addEventListener('click', () => window.click2saveFloating.quit());
+els.quitBtn.addEventListener('click', () => window.deskLibraryFloating.quit());
 
 window.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
-    window.click2saveFloating.closeMenu();
+    window.deskLibraryFloating.closeMenu();
   }
 });
 

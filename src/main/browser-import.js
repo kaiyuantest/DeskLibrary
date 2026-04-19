@@ -148,7 +148,7 @@ function runPythonJson(scriptPath, args = []) {
 }
 
 function writeTempJsonArg(name, value) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-py-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'desklibrary-py-'));
   const filePath = path.join(dir, `${name}.json`);
   fs.writeFileSync(filePath, JSON.stringify(value ?? {}, null, 0), 'utf8');
   return {

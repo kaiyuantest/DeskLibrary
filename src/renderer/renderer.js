@@ -68,17 +68,25 @@ const els = {
   assetsPageBtn: document.getElementById('assetsPageBtn'),
   browserCardsPageBtn: document.getElementById('browserCardsPageBtn'),
   settingsPageBtn: document.getElementById('settingsPageBtn'),
+  aboutPageBtn: document.getElementById('aboutPageBtn'),
   mobileDailyNavBtn: document.getElementById('mobileDailyNavBtn'),
   mobileCommonNavBtn: document.getElementById('mobileCommonNavBtn'),
   mobileAssetsNavBtn: document.getElementById('mobileAssetsNavBtn'),
   mobileBrowserCardsNavBtn: document.getElementById('mobileBrowserCardsNavBtn'),
   mobileSettingsNavBtn: document.getElementById('mobileSettingsNavBtn'),
+  mobileAboutNavBtn: document.getElementById('mobileAboutNavBtn'),
   refreshBtn: document.getElementById('refreshBtn'),
   dailyPage: document.getElementById('dailyPage'),
   commonPage: document.getElementById('commonPage'),
   assetsPage: document.getElementById('assetsPage'),
   browserCardsPage: document.getElementById('browserCardsPage'),
   settingsPage: document.getElementById('settingsPage'),
+  aboutPage: document.getElementById('aboutPage'),
+  topbarControlDeck: document.getElementById('topbarControlDeck'),
+  aboutOpenSourceBtn: document.getElementById('aboutOpenSourceBtn'),
+  aboutFeedbackForm: document.getElementById('aboutFeedbackForm'),
+  aboutFeedbackSubmitBtn: document.getElementById('aboutFeedbackSubmitBtn'),
+  aboutFeedbackStatus: document.getElementById('aboutFeedbackStatus'),
   dailySearchInput: document.getElementById('dailySearchInput'),
   imageOnlyToggle: document.getElementById('imageOnlyToggle'),
   sourceFilterSelect: document.getElementById('sourceFilterSelect'),
@@ -150,8 +158,23 @@ const els = {
   floatingIconEnabled: document.getElementById('floatingIconEnabled'),
   dockToEdgeEnabled: document.getElementById('dockToEdgeEnabled'),
   postCopyKey: document.getElementById('postCopyKey'),
+  altQShortcutInput: document.getElementById('altQShortcutInput'),
+  deleteLastCaptureShortcutInput: document.getElementById('deleteLastCaptureShortcutInput'),
+  accumulationStartShortcutInput: document.getElementById('accumulationStartShortcutInput'),
+  accumulationFinishShortcutInput: document.getElementById('accumulationFinishShortcutInput'),
+  accumulationUndoShortcutInput: document.getElementById('accumulationUndoShortcutInput'),
+  hotkeyDeleteLastEnabled: document.getElementById('hotkeyDeleteLastEnabled'),
+  hotkeyStartAccumEnabled: document.getElementById('hotkeyStartAccumEnabled'),
+  hotkeyFinishAccumEnabled: document.getElementById('hotkeyFinishAccumEnabled'),
+  hotkeyUndoAccumEnabled: document.getElementById('hotkeyUndoAccumEnabled'),
   selfBuiltWorkspaceDirInput: document.getElementById('selfBuiltWorkspaceDirInput'),
   saveSettingsBtn: document.getElementById('saveSettingsBtn'),
+  settingsHelpModal: document.getElementById('settingsHelpModal'),
+  settingsHelpModalOverlay: document.getElementById('settingsHelpModalOverlay'),
+  closeSettingsHelpModalBtn: document.getElementById('closeSettingsHelpModalBtn'),
+  settingsHelpTitle: document.getElementById('settingsHelpTitle'),
+  settingsHelpSubline: document.getElementById('settingsHelpSubline'),
+  settingsHelpBody: document.getElementById('settingsHelpBody'),
   recordModal: document.getElementById('recordModal'),
   modalOverlay: document.getElementById('modalOverlay'),
   closeModalBtn: document.getElementById('closeModalBtn'),
@@ -327,7 +350,7 @@ function recordsForCurrentPage() {
   if (state.currentPage === 'common') return commonRecords();
   if (isAssetsPage()) return [];
   if (isBrowserCardsPage()) return [];
-  if (state.currentPage === 'settings') return [];
+  if (state.currentPage === 'settings' || state.currentPage === 'about') return [];
   return dailyRecords();
 }
 
@@ -582,24 +605,38 @@ function renderPage() {
         ? '资源库'
         : current === 'browserCards'
           ? '浏览器卡片'
-          : '设置';
+          : current === 'about'
+            ? '关于与反馈'
+            : '设置';
   els.dailyPage.classList.toggle('hidden', current !== 'daily');
   els.commonPage.classList.toggle('hidden', current !== 'common');
   els.assetsPage.classList.toggle('hidden', !isAssetsPage());
   els.browserCardsPage.classList.toggle('hidden', !isBrowserCardsPage());
   els.settingsPage.classList.toggle('hidden', current !== 'settings');
+  if (els.aboutPage) {
+    els.aboutPage.classList.toggle('hidden', current !== 'about');
+  }
+  if (els.topbarControlDeck) {
+    els.topbarControlDeck.classList.toggle('hidden', current === 'settings' || current === 'about');
+  }
   els.dailyFilterBar.classList.toggle('hidden', current !== 'daily');
   els.dailyPageBtn.classList.toggle('active', current === 'daily');
   els.commonPageBtn.classList.toggle('active', current === 'common');
   els.assetsPageBtn.classList.toggle('active', current === 'assets');
   els.browserCardsPageBtn.classList.toggle('active', current === 'browserCards');
   els.settingsPageBtn.classList.toggle('active', current === 'settings');
+  if (els.aboutPageBtn) {
+    els.aboutPageBtn.classList.toggle('active', current === 'about');
+  }
   if (els.mobileDailyNavBtn) {
     els.mobileDailyNavBtn.classList.toggle('active', current === 'daily');
     els.mobileCommonNavBtn.classList.toggle('active', current === 'common');
     els.mobileAssetsNavBtn.classList.toggle('active', current === 'assets');
     els.mobileBrowserCardsNavBtn.classList.toggle('active', current === 'browserCards');
     els.mobileSettingsNavBtn.classList.toggle('active', current === 'settings');
+    if (els.mobileAboutNavBtn) {
+      els.mobileAboutNavBtn.classList.toggle('active', current === 'about');
+    }
   }
   if (isAssetsPage()) {
     els.assetsPageHeading.textContent = '资源库';
@@ -790,7 +827,7 @@ function renderRecordList(container, records) {
     if (copyButton) {
       copyButton.addEventListener('click', async (event) => {
         event.stopPropagation();
-        const result = await window.click2save.copyRecordContent(record.id);
+        const result = await window.deskLibrary.copyRecordContent(record.id);
         if (result && result.ok === false) {
           alert(result.message || '复制失败');
         }
@@ -902,7 +939,7 @@ function renderAssetList() {
     const openButton = item.querySelector('.card-open-btn');
     openButton?.addEventListener('click', async (event) => {
       event.stopPropagation();
-      const result = await window.click2save.openAssetPrimary(asset.id);
+      const result = await window.deskLibrary.openAssetPrimary(asset.id);
       if (result && result.ok === false) {
         alert(result.message || '打开失败');
       }
@@ -910,7 +947,7 @@ function renderAssetList() {
     const locationButton = item.querySelector('.card-location-btn');
     locationButton?.addEventListener('click', async (event) => {
       event.stopPropagation();
-      const result = await window.click2save.openAssetLocation(asset.id);
+      const result = await window.deskLibrary.openAssetLocation(asset.id);
       if (result && result.ok === false) {
         alert(result.message || '打开失败');
       }
@@ -1000,42 +1037,42 @@ function renderBrowserCardsList() {
       };
       item.querySelector('[data-browser-card-open]')?.addEventListener('click', async (event) => {
         event.stopPropagation();
-        const result = await window.click2save.openBrowserCard(card.id);
+        const result = await window.deskLibrary.openBrowserCard(card.id);
         if (result && result.ok === false) {
           alert(result.message || '打开失败');
         }
       });
       item.querySelector('[data-browser-card-test]')?.addEventListener('click', async (event) => {
         event.stopPropagation();
-        const result = await window.click2save.checkBrowserCardConnectivity([card.id]);
+        const result = await window.deskLibrary.checkBrowserCardConnectivity([card.id]);
         if (result && result.ok === false) {
           alert(result.message || '测试失败');
           return;
         }
-        applySnapshot(await window.click2save.getInitialData());
+        applySnapshot(await window.deskLibrary.getInitialData());
       });
       item.querySelector('[data-browser-card-refresh]')?.addEventListener('click', async (event) => {
         event.stopPropagation();
-        const result = await window.click2save.refreshBrowserCardCookies(card.id);
+        const result = await window.deskLibrary.refreshBrowserCardCookies(card.id);
         if (result && result.ok === false) {
           alert(result.message || '更新 Cookie 失败');
           return;
         }
-        applySnapshot(await window.click2save.getInitialData());
+        applySnapshot(await window.deskLibrary.getInitialData());
       });
       item.querySelector('[data-browser-card-rewrite]')?.addEventListener('click', async (event) => {
         event.stopPropagation();
-        const result = await window.click2save.rewriteBrowserCardCookies(card.id);
+        const result = await window.deskLibrary.rewriteBrowserCardCookies(card.id);
         if (result && result.rewriteDebug) {
           // 主进程也会 console.log；此处便于在渲染进程 DevTools 里对照卡片目录与 CDP
           // eslint-disable-next-line no-console
-          console.log('[Click2Save][重] CDP/卡片对照（自建）', result.rewriteDebug);
+          console.log('[DeskLibrary][重] CDP/卡片对照（自建）', result.rewriteDebug);
         }
         if (result && result.ok === false) {
           alert(result.message || '重写 Cookie 失败');
           return;
         }
-        applySnapshot(await window.click2save.getInitialData());
+        applySnapshot(await window.deskLibrary.getInitialData());
       });
       item.querySelector('[data-browser-card-inject]')?.addEventListener('click', async (event) => {
         event.stopPropagation();
@@ -1050,7 +1087,7 @@ function renderBrowserCardsList() {
       });
       item.querySelector('[data-browser-card-source]')?.addEventListener('click', async (event) => {
         event.stopPropagation();
-        const result = await window.click2save.openBrowserCardSource(card.id);
+        const result = await window.deskLibrary.openBrowserCardSource(card.id);
         if (result && result.ok === false) {
           alert(result.message || '打开失败');
         }
@@ -1058,12 +1095,12 @@ function renderBrowserCardsList() {
       item.querySelector('[data-browser-card-delete-inline]')?.addEventListener('click', async (event) => {
         event.stopPropagation();
         if (!window.confirm('确认删除这张浏览器卡片吗？')) return;
-        const result = await window.click2save.deleteBrowserCard(card.id);
+        const result = await window.deskLibrary.deleteBrowserCard(card.id);
         if (result && result.ok === false) {
           alert(result.message || '删除失败');
           return;
         }
-        applySnapshot(await window.click2save.getInitialData());
+        applySnapshot(await window.deskLibrary.getInitialData());
       });
       item.querySelector('[data-browser-card-select]')?.addEventListener('click', (event) => {
         event.stopPropagation();
@@ -1391,20 +1428,120 @@ function renderModal() {
   }
 }
 
+const SETTINGS_HELP = {
+  autoJudgment: {
+    title: '复制后智能判断（文本）',
+    subline: '无单独全局快捷键',
+    body: '剪贴板内容变化后，会进入短时间观察期。若未通过「复制后再按修饰键」等方式提前结束，则在约 1.5 秒后对纯文本做规则判断：是否包含换行、链接、较长正文或常见工作类关键词等。命中则自动保存为一条收藏；未命中则不会保存。图片等内容不会套用此自动规则。'
+  },
+  altQ: {
+    title: '立即收藏剪贴板（全局）',
+    subline: '快捷键可改，须符合系统可注册组合',
+    body: '在任意时刻按下所设全局快捷键，可立即将当前剪贴板中的文本或图片保存为一条收藏，跳过观察窗口。适合已经复制完毕、希望马上归档的场景。需打开右侧开关后生效。保存后重新注册热键。'
+  },
+  doubleCopy: {
+    title: '观察窗口内连按两次复制',
+    subline: '依赖系统复制快捷键（如 Ctrl+C）',
+    body: '在检测到复制操作后会进入观察窗口。开启本项后，在窗口内连续两次触发复制（剪贴板变化两次），会将内容按规则合并为一次收藏，适合分段复制同一主题。'
+  },
+  copyThenKey: {
+    title: '复制后再按修饰键收藏',
+    subline: '中间输入框填 Shift / Ctrl / Alt 之一',
+    body: '复制后进入观察窗口时，可在窗口未结束前按下所填修饰键之一，立即保存当前剪贴板。若在观察窗口内按下 Alt（无论此处填何键），可将当前内容加入「常用」分类。此项由全局按键监听实现，不是 Electron 全局热键。'
+  },
+  deleteLastCapture: {
+    title: '删除上次收藏',
+    subline: 'Electron 全局快捷键',
+    body: '删除当前排序下最新的一条收藏记录。中间为可编辑快捷键（如 Ctrl+Alt+Z），右侧开关关闭后不再注册全局热键，仍可从悬浮球菜单操作。保存后生效。'
+  },
+  startAccumulation: {
+    title: '开始累计',
+    subline: 'Electron 全局快捷键',
+    body: '进入累计复制模式后，之后每次复制会追加到同一张卡片，直到「结束累计」或「取消累计」。中间为快捷键，右侧开关可关闭全局注册。也可从悬浮球菜单开始。'
+  },
+  finishAccumulation: {
+    title: '结束累计',
+    subline: 'Electron 全局快捷键',
+    body: '结束累计复制会话，将已合并的正文保留为一条完整收藏。也可从悬浮球菜单结束。'
+  },
+  undoAccumulation: {
+    title: '撤销上一段',
+    subline: '仅在累计会话中',
+    body: '在累计复制过程中，移除最后追加的一段文本。中间留空则不会注册全局热键，请用悬浮球菜单；填写快捷键并打开右侧开关后可全局触发。'
+  }
+};
+
+function normalizeWindowsPathDisplay(value) {
+  if (value == null || value === '') return '';
+  const s = String(value);
+  if (/^\\\\[^\\]/.test(s)) return s;
+  return s.replace(/\\{2,}/g, '\\');
+}
+
+function openSettingsHelpModal(key) {
+  const entry = SETTINGS_HELP[key];
+  if (!entry || !els.settingsHelpModal) return;
+  els.settingsHelpTitle.textContent = entry.title;
+  if (els.settingsHelpSubline) {
+    els.settingsHelpSubline.textContent = entry.subline || '';
+  }
+  els.settingsHelpBody.textContent = entry.body;
+  els.settingsHelpModal.classList.remove('hidden');
+}
+
+function closeSettingsHelpModal() {
+  els.settingsHelpModal?.classList.add('hidden');
+}
+
 function renderSettings() {
-  els.autoJudgmentEnabled.checked = !!state.settings.autoJudgmentEnabled;
-  els.altQEnabled.checked = !!state.settings.altQEnabled;
-  els.doubleCopyEnabled.checked = !!state.settings.doubleCopyEnabled;
-  els.copyThenKeyEnabled.checked = !!state.settings.copyThenKeyEnabled;
-  els.startupLaunchEnabled.checked = !!state.settings.startupLaunchEnabled;
-  els.floatingIconEnabled.checked = !!state.settings.floatingIconEnabled;
-  els.dockToEdgeEnabled.checked = state.settings.dockToEdgeEnabled !== false;
-  els.postCopyKey.value = state.settings.postCopyKey || 'Shift';
+  const s = state.settings || {};
+  els.autoJudgmentEnabled.checked = !!s.autoJudgmentEnabled;
+  els.altQEnabled.checked = !!s.altQEnabled;
+  els.doubleCopyEnabled.checked = !!s.doubleCopyEnabled;
+  els.copyThenKeyEnabled.checked = !!s.copyThenKeyEnabled;
+  els.startupLaunchEnabled.checked = !!s.startupLaunchEnabled;
+  els.floatingIconEnabled.checked = !!s.floatingIconEnabled;
+  els.dockToEdgeEnabled.checked = s.dockToEdgeEnabled !== false;
+  if (els.altQShortcutInput) {
+    els.altQShortcutInput.value = s.altQShortcut || 'Alt+Q';
+  }
+  els.postCopyKey.value = s.postCopyKey || 'Shift';
+  if (els.deleteLastCaptureShortcutInput) {
+    els.deleteLastCaptureShortcutInput.value = s.deleteLastCaptureShortcut != null
+      ? s.deleteLastCaptureShortcut
+      : 'Ctrl+Alt+Z';
+  }
+  if (els.accumulationStartShortcutInput) {
+    els.accumulationStartShortcutInput.value = s.accumulationStartShortcut != null
+      ? s.accumulationStartShortcut
+      : 'Ctrl+Alt+A';
+  }
+  if (els.accumulationFinishShortcutInput) {
+    els.accumulationFinishShortcutInput.value = s.accumulationFinishShortcut != null
+      ? s.accumulationFinishShortcut
+      : 'Ctrl+Alt+S';
+  }
+  if (els.accumulationUndoShortcutInput) {
+    els.accumulationUndoShortcutInput.value = s.accumulationUndoShortcut || '';
+  }
+  if (els.hotkeyDeleteLastEnabled) {
+    els.hotkeyDeleteLastEnabled.checked = s.hotkeyDeleteLastEnabled !== false;
+  }
+  if (els.hotkeyStartAccumEnabled) {
+    els.hotkeyStartAccumEnabled.checked = s.hotkeyStartAccumEnabled !== false;
+  }
+  if (els.hotkeyFinishAccumEnabled) {
+    els.hotkeyFinishAccumEnabled.checked = s.hotkeyFinishAccumEnabled !== false;
+  }
+  if (els.hotkeyUndoAccumEnabled) {
+    els.hotkeyUndoAccumEnabled.checked = !!s.hotkeyUndoAccumEnabled;
+  }
   if (els.selfBuiltWorkspaceDirInput) {
-    els.selfBuiltWorkspaceDirInput.value = state.settings.selfBuiltWorkspaceDir
-      || state.settings.selfBuiltUserDataRoot
-      || state.settings.browserScanRoot
+    const raw = s.selfBuiltWorkspaceDir
+      || s.selfBuiltUserDataRoot
+      || s.browserScanRoot
       || '';
+    els.selfBuiltWorkspaceDirInput.value = normalizeWindowsPathDisplay(raw);
   }
 }
 
@@ -1527,7 +1664,7 @@ function renderBrowserOnlineImportModal() {
 async function loadBrowserOnlineImportTargets() {
   state.browserOnlineImportStatus = '正在刷新在线导入目标…';
   renderBrowserOnlineImportModal();
-  const result = await window.click2save.listOnlineImportTargets();
+  const result = await window.deskLibrary.listOnlineImportTargets();
   if (!result || result.ok === false) {
     state.browserOnlineImportTargets = [];
     state.browserOnlineImportStatus = (result && result.message) || '获取在线导入目标失败';
@@ -1608,7 +1745,7 @@ async function submitBrowserOnlineImport() {
   }
   state.browserOnlineImportStatus = '正在提取 Cookie 并导入…';
   renderBrowserOnlineImportModal();
-  const result = await window.click2save.runOnlineImport({
+  const result = await window.deskLibrary.runOnlineImport({
     target,
     accountName,
     inheritBrowserSource
@@ -1620,7 +1757,7 @@ async function submitBrowserOnlineImport() {
     return;
   }
   closeBrowserOnlineImportModal();
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 }
 
 function openBrowserImportModal() {
@@ -1673,7 +1810,7 @@ function applySnapshot(payload) {
 }
 
 function collectSettings() {
-  const selfBuiltWorkspaceDir = (els.selfBuiltWorkspaceDirInput?.value || '').trim();
+  const selfBuiltWorkspaceDir = normalizeWindowsPathDisplay((els.selfBuiltWorkspaceDirInput?.value || '').trim());
   return {
     autoJudgmentEnabled: els.autoJudgmentEnabled.checked,
     altQEnabled: els.altQEnabled.checked,
@@ -1683,6 +1820,15 @@ function collectSettings() {
     floatingIconEnabled: els.floatingIconEnabled.checked,
     dockToEdgeEnabled: els.dockToEdgeEnabled.checked,
     postCopyKey: els.postCopyKey.value.trim() || 'Shift',
+    altQShortcut: (els.altQShortcutInput?.value || '').trim() || 'Alt+Q',
+    deleteLastCaptureShortcut: (els.deleteLastCaptureShortcutInput?.value || '').trim(),
+    accumulationStartShortcut: (els.accumulationStartShortcutInput?.value || '').trim(),
+    accumulationFinishShortcut: (els.accumulationFinishShortcutInput?.value || '').trim(),
+    accumulationUndoShortcut: (els.accumulationUndoShortcutInput?.value || '').trim(),
+    hotkeyDeleteLastEnabled: !!els.hotkeyDeleteLastEnabled?.checked,
+    hotkeyStartAccumEnabled: !!els.hotkeyStartAccumEnabled?.checked,
+    hotkeyFinishAccumEnabled: !!els.hotkeyFinishAccumEnabled?.checked,
+    hotkeyUndoAccumEnabled: !!els.hotkeyUndoAccumEnabled?.checked,
     selfBuiltWorkspaceDir,
     browserScanRoot: selfBuiltWorkspaceDir,
     selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
@@ -1702,7 +1848,7 @@ function switchPage(page) {
 async function importAssetPaths(paths, mode) {
   const validPaths = [...new Set((paths || []).map((item) => String(item || '').trim()).filter(Boolean))];
   if (!validPaths.length) return;
-  const result = await window.click2save.importAssets({
+  const result = await window.deskLibrary.importAssets({
     mode,
     paths: validPaths
   });
@@ -1726,7 +1872,7 @@ async function scanBrowserCards(scope = 'all') {
     || state.settings.selfBuiltUserDataRoot
     || state.settings.browserScanRoot
     || '';
-  const result = await window.click2save.scanBrowserCards({
+  const result = await window.deskLibrary.scanBrowserCards({
     scope,
     selfBuiltWorkspaceDir: selfBuiltRoot,
     selfBuiltRoot
@@ -1754,11 +1900,11 @@ async function loadBrowserImportSources() {
   state.browserScanSummary = '正在加载来源列表...';
   renderBrowserImportModal();
   const result = state.browserImportTab === 'self_built'
-    ? await window.click2save.getSelfBuiltImportSources({
+    ? await window.deskLibrary.getSelfBuiltImportSources({
         selfBuiltWorkspaceDir,
         selfBuiltRoot: selfBuiltWorkspaceDir
       })
-    : await window.click2save.getBrowserImportSources({
+    : await window.deskLibrary.getBrowserImportSources({
         bitApiUrl,
         bitApiToken,
         selfBuiltWorkspaceDir,
@@ -1803,7 +1949,7 @@ async function openSelfBuiltBrowserFromModal() {
   }
   state.browserScanSummary = `正在打开自建浏览器，端口 ${port}...`;
   renderBrowserImportModal();
-  const result = await window.click2save.openSelfBuiltBrowser({
+  const result = await window.deskLibrary.openSelfBuiltBrowser({
     port,
     selfBuiltWorkspaceDir: state.settings.selfBuiltWorkspaceDir || state.settings.selfBuiltUserDataRoot || state.settings.browserScanRoot || '',
     selfBuiltRoot: state.settings.selfBuiltWorkspaceDir || state.settings.selfBuiltUserDataRoot || state.settings.browserScanRoot || '',
@@ -1835,7 +1981,7 @@ async function saveBrowserImportBitConfig() {
     bitApiUrl: (els.browserImportBitApiUrlInput?.value || '').trim() || 'http://127.0.0.1:54345',
     bitApiToken: (els.browserImportBitApiTokenInput?.value || '').trim()
   };
-  const result = await window.click2save.saveSettings(nextSettings);
+  const result = await window.deskLibrary.saveSettings(nextSettings);
   if (result && result.ok === false) {
     alert(result.message || '保存失败');
     return;
@@ -1848,7 +1994,7 @@ async function saveBrowserImportBitConfig() {
 async function loadBrowserInjectTargets() {
   state.browserInjectStatus = '正在刷新目标浏览器...';
   renderBrowserInjectModal();
-  const result = await window.click2save.getBrowserInjectTargets();
+  const result = await window.deskLibrary.getBrowserInjectTargets();
   if (!result || result.ok === false) {
     state.browserInjectTargets = [];
     state.browserInjectStatus = (result && result.message) || '获取目标浏览器失败';
@@ -1883,7 +2029,7 @@ async function executeBrowserCardInject() {
   state.browserInjectMethod = method;
   state.browserInjectStatus = '正在转移 Cookie...';
   renderBrowserInjectModal();
-  const result = await window.click2save.executeBrowserCardInject({
+  const result = await window.deskLibrary.executeBrowserCardInject({
     id: cardId,
     method,
     target
@@ -1895,7 +2041,7 @@ async function executeBrowserCardInject() {
     return;
   }
   closeBrowserInjectModal();
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 }
 
 async function batchDeleteBrowserCards() {
@@ -1907,13 +2053,13 @@ async function batchDeleteBrowserCards() {
   if (!window.confirm(`确认删除选中的 ${ids.length} 张卡片吗？`)) {
     return;
   }
-  const result = await window.click2save.deleteBrowserCards(ids);
+  const result = await window.deskLibrary.deleteBrowserCards(ids);
   if (result && result.ok === false) {
     alert(result.message || '批量删除失败');
     return;
   }
   state.browserCardSelection = {};
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 }
 
 async function batchTestBrowserCards() {
@@ -1924,12 +2070,12 @@ async function batchTestBrowserCards() {
   }
   state.statusText = `正在测试 ${ids.length} 张浏览器卡片...`;
   render();
-  const result = await window.click2save.checkBrowserCardConnectivity(ids);
+  const result = await window.deskLibrary.checkBrowserCardConnectivity(ids);
   if (result && result.ok === false) {
     alert(result.message || '批量测试失败');
     return;
   }
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 }
 
 async function loadBrowserImportGroups() {
@@ -1949,7 +2095,7 @@ async function loadBrowserImportGroups() {
     const source = selectedSources[index];
     state.browserScanSummary = `正在读取 Cookie... (${index + 1}/${selectedSources.length}) ${source.label}`;
     renderBrowserImportModal();
-    const result = await window.click2save.loadBrowserImportGroups({
+    const result = await window.deskLibrary.loadBrowserImportGroups({
       bitApiUrl,
       bitApiToken,
       selfBuiltWorkspaceDir: state.settings.selfBuiltWorkspaceDir || state.settings.selfBuiltUserDataRoot || state.settings.browserScanRoot || '',
@@ -2002,7 +2148,7 @@ async function importSelectedBrowserCards() {
   const cards = [];
   for (const [key, groups] of groupedBySource.entries()) {
     const [sourceType, sourceId] = key.split('|');
-    const built = await window.click2save.buildBrowserImportCards({
+    const built = await window.deskLibrary.buildBrowserImportCards({
       sourceType,
       sourceId,
       groups
@@ -2014,7 +2160,7 @@ async function importSelectedBrowserCards() {
     cards.push(...(built.results || []));
   }
 
-  const result = await window.click2save.importBrowserCards({
+  const result = await window.deskLibrary.importBrowserCards({
     cards
   });
   if (result && result.ok === false) {
@@ -2025,7 +2171,7 @@ async function importSelectedBrowserCards() {
   state.browserScanSummary = `已导入 ${selectedGroups.length} 张卡片`;
   resetBrowserImportSelection();
   closeBrowserImportModal();
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 }
 
 els.dailyPageBtn.addEventListener('click', () => switchPage('daily'));
@@ -2033,23 +2179,25 @@ els.commonPageBtn.addEventListener('click', () => switchPage('common'));
 els.assetsPageBtn.addEventListener('click', () => switchPage('assets'));
 els.browserCardsPageBtn?.addEventListener('click', () => switchPage('browserCards'));
 els.settingsPageBtn.addEventListener('click', () => switchPage('settings'));
+els.aboutPageBtn?.addEventListener('click', () => switchPage('about'));
 els.mobileDailyNavBtn?.addEventListener('click', () => switchPage('daily'));
 els.mobileCommonNavBtn?.addEventListener('click', () => switchPage('common'));
 els.mobileAssetsNavBtn?.addEventListener('click', () => switchPage('assets'));
 els.mobileBrowserCardsNavBtn?.addEventListener('click', () => switchPage('browserCards'));
 els.mobileSettingsNavBtn?.addEventListener('click', () => switchPage('settings'));
-els.windowMinBtn.addEventListener('click', () => window.click2save.minimizeWindow());
+els.mobileAboutNavBtn?.addEventListener('click', () => switchPage('about'));
+els.windowMinBtn.addEventListener('click', () => window.deskLibrary.minimizeWindow());
 els.windowMaxBtn.addEventListener('click', async () => {
-  const result = await window.click2save.toggleMaximizeWindow();
+  const result = await window.deskLibrary.toggleMaximizeWindow();
   els.windowMaxBtn.textContent = result && result.maximized ? '❐' : '□';
 });
-els.windowCloseBtn.addEventListener('click', () => window.click2save.closeWindow());
+els.windowCloseBtn.addEventListener('click', () => window.deskLibrary.closeWindow());
 
 els.refreshBtn.addEventListener('click', async () => {
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 });
 els.mobileRefreshBtn?.addEventListener('click', async () => {
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 });
 
 function toggleMobileDateTools() {
@@ -2302,7 +2450,7 @@ els.browserImportConfirmBtn?.addEventListener('click', async () => {
 });
 
 els.createRecordBtn.addEventListener('click', async () => {
-  const result = await window.click2save.createManualTextRecord(els.newRecordDraft.value);
+  const result = await window.deskLibrary.createManualTextRecord(els.newRecordDraft.value);
   if (result.ok) {
     els.newRecordDraft.value = '';
   } else if (result.message) {
@@ -2313,13 +2461,13 @@ els.createRecordBtn.addEventListener('click', async () => {
 els.saveContentBtn.addEventListener('click', async () => {
   const record = selectedRecord();
   if (!record || record.contentType !== 'text') return;
-  await window.click2save.updateRecordContent({ id: record.id, textContent: els.detailTextContent.value });
+  await window.deskLibrary.updateRecordContent({ id: record.id, textContent: els.detailTextContent.value });
 });
 
 els.moveToCommonBtn.addEventListener('click', async () => {
   const record = selectedRecord();
   if (!record) return;
-  await window.click2save.moveRecordToCommon(record.id);
+  await window.deskLibrary.moveRecordToCommon(record.id);
   state.currentPage = 'common';
   render();
   closeModal();
@@ -2328,7 +2476,7 @@ els.moveToCommonBtn.addEventListener('click', async () => {
 els.moveToDailyBtn.addEventListener('click', async () => {
   const record = selectedRecord();
   if (!record) return;
-  await window.click2save.moveRecordToDaily(record.id);
+  await window.deskLibrary.moveRecordToDaily(record.id);
   state.currentPage = 'daily';
   render();
   closeModal();
@@ -2337,7 +2485,7 @@ els.moveToDailyBtn.addEventListener('click', async () => {
 els.saveNoteBtn.addEventListener('click', async () => {
   const record = selectedRecord();
   if (!record) return;
-  await window.click2save.updateRecordNote({ id: record.id, editableNote: els.detailNote.value });
+  await window.deskLibrary.updateRecordNote({ id: record.id, editableNote: els.detailNote.value });
 });
 
 els.deleteRecordBtn.addEventListener('click', async () => {
@@ -2345,14 +2493,14 @@ els.deleteRecordBtn.addEventListener('click', async () => {
   if (!record) return;
   const confirmed = window.confirm('确认删除这条记录吗？删除后无法恢复。');
   if (!confirmed) return;
-  await window.click2save.deleteRecord(record.id);
+  await window.deskLibrary.deleteRecord(record.id);
   state.selectedRecordId = null;
   closeModal();
 });
 
 els.saveSettingsBtn.addEventListener('click', async () => {
   const nextSettings = collectSettings();
-  const result = await window.click2save.saveSettings(nextSettings);
+  const result = await window.deskLibrary.saveSettings(nextSettings);
   if (result && result.ok === false) {
     alert(result.message || '保存设置失败');
     return;
@@ -2365,16 +2513,27 @@ els.saveSettingsBtn.addEventListener('click', async () => {
   renderSettings();
 });
 
+els.settingsPage?.addEventListener('click', (event) => {
+  const trigger = event.target.closest('[data-help-key]');
+  if (!trigger) return;
+  event.preventDefault();
+  event.stopPropagation();
+  openSettingsHelpModal(trigger.getAttribute('data-help-key'));
+});
+
+els.closeSettingsHelpModalBtn?.addEventListener('click', () => closeSettingsHelpModal());
+els.settingsHelpModalOverlay?.addEventListener('click', () => closeSettingsHelpModal());
+
 els.openImagePathBtn.addEventListener('click', async () => {
   const record = selectedRecord();
   if (!record || !record.imagePath) return;
-  await window.click2save.openImagePath(record.imagePath);
+  await window.deskLibrary.openImagePath(record.imagePath);
 });
 
 els.assetOpenPrimaryBtn?.addEventListener('click', async () => {
   const asset = selectedAsset();
   if (!asset) return;
-  const result = await window.click2save.openAssetPrimary(asset.id);
+  const result = await window.deskLibrary.openAssetPrimary(asset.id);
   if (result && result.ok === false) {
     alert(result.message || '打开失败');
   }
@@ -2383,7 +2542,7 @@ els.assetOpenPrimaryBtn?.addEventListener('click', async () => {
 els.assetOpenSourceBtn?.addEventListener('click', async () => {
   const asset = selectedAsset();
   if (!asset) return;
-  const result = await window.click2save.openAssetSource(asset.id);
+  const result = await window.deskLibrary.openAssetSource(asset.id);
   if (result && result.ok === false) {
     alert(result.message || '打开失败');
   }
@@ -2392,7 +2551,7 @@ els.assetOpenSourceBtn?.addEventListener('click', async () => {
 els.assetOpenLocationBtn?.addEventListener('click', async () => {
   const asset = selectedAsset();
   if (!asset) return;
-  const result = await window.click2save.openAssetLocation(asset.id);
+  const result = await window.deskLibrary.openAssetLocation(asset.id);
   if (result && result.ok === false) {
     alert(result.message || '打开失败');
   }
@@ -2401,7 +2560,7 @@ els.assetOpenLocationBtn?.addEventListener('click', async () => {
 els.assetSaveNoteBtn?.addEventListener('click', async () => {
   const asset = selectedAsset();
   if (!asset) return;
-  const result = await window.click2save.updateAssetNote({
+  const result = await window.deskLibrary.updateAssetNote({
     id: asset.id,
     note: els.assetNoteInput.value
   });
@@ -2414,7 +2573,7 @@ els.assetDeleteBtn?.addEventListener('click', async () => {
   const asset = selectedAsset();
   if (!asset) return;
   if (!window.confirm('确认删除这个资源吗？')) return;
-  const result = await window.click2save.deleteAsset(asset.id);
+  const result = await window.deskLibrary.deleteAsset(asset.id);
   if (result && result.ok === false) {
     alert(result.message || '删除失败');
     return;
@@ -2425,7 +2584,7 @@ els.assetDeleteBtn?.addEventListener('click', async () => {
 els.browserCardOpenBtn?.addEventListener('click', async () => {
   const card = selectedBrowserCard();
   if (!card) return;
-  const result = await window.click2save.openBrowserCard(card.id);
+  const result = await window.deskLibrary.openBrowserCard(card.id);
   if (result && result.ok === false) {
     alert(result.message || '打开失败');
   }
@@ -2441,7 +2600,7 @@ els.browserCardInjectBtn?.addEventListener('click', async () => {
 els.browserCardOpenSourceBtn?.addEventListener('click', async () => {
   const card = selectedBrowserCard();
   if (!card) return;
-  const result = await window.click2save.openBrowserCardSource(card.id);
+  const result = await window.deskLibrary.openBrowserCardSource(card.id);
   if (result && result.ok === false) {
     alert(result.message || '打开失败');
   }
@@ -2450,7 +2609,7 @@ els.browserCardOpenSourceBtn?.addEventListener('click', async () => {
 els.browserCardSaveBtn?.addEventListener('click', async () => {
   const card = selectedBrowserCard();
   if (!card) return;
-  const result = await window.click2save.updateBrowserCard({
+  const result = await window.deskLibrary.updateBrowserCard({
     id: card.id,
     name: els.browserCardNameInput.value,
     remark: els.browserCardRemarkInput.value,
@@ -2462,22 +2621,76 @@ els.browserCardSaveBtn?.addEventListener('click', async () => {
     alert(result.message || '保存失败');
     return;
   }
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 });
 
 els.browserCardDeleteBtn?.addEventListener('click', async () => {
   const card = selectedBrowserCard();
   if (!card) return;
   if (!window.confirm('确认删除这张浏览器卡片吗？')) return;
-  const result = await window.click2save.deleteBrowserCard(card.id);
+  const result = await window.deskLibrary.deleteBrowserCard(card.id);
   if (result && result.ok === false) {
     alert(result.message || '删除失败');
     return;
   }
   state.selectedBrowserCardId = null;
   closeBrowserCardModal();
-  applySnapshot(await window.click2save.getInitialData());
+  applySnapshot(await window.deskLibrary.getInitialData());
 });
 
-window.click2save.onSnapshot(applySnapshot);
-window.click2save.getInitialData().then(applySnapshot);
+const ABOUT_REPO_URL = 'https://github.com/kaiyuantest/click2save-electron';
+const FEEDBACK_POST_URL = 'https://www.swdtbook.com/mail/send.php';
+
+els.aboutOpenSourceBtn?.addEventListener('click', async () => {
+  const result = await window.deskLibrary.openExternalUrl(ABOUT_REPO_URL);
+  if (result && result.ok === false) {
+    alert(result.message || '无法打开链接');
+  }
+});
+
+els.aboutFeedbackForm?.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const title = (document.getElementById('aboutFeedbackTitle')?.value || '').trim();
+  const contact = (document.getElementById('aboutFeedbackContact')?.value || '').trim();
+  const message = (document.getElementById('aboutFeedbackMessage')?.value || '').trim();
+  if (!message) {
+    alert('请填写反馈内容');
+    return;
+  }
+  const statusEl = els.aboutFeedbackStatus;
+  const btn = els.aboutFeedbackSubmitBtn;
+  if (statusEl) statusEl.textContent = '';
+  if (btn) btn.disabled = true;
+  try {
+    const body = new URLSearchParams();
+    body.set('title', title || 'DeskLibrary 用户留言');
+    body.set('contact', contact || '未填写联系方式');
+    body.set('message', message);
+    body.set('source', 'DeskLibrary 桌面版');
+    const res = await fetch(FEEDBACK_POST_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+      body: body.toString()
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data && data.ok) {
+      if (statusEl) statusEl.textContent = data.message || '发送成功';
+      els.aboutFeedbackForm.reset();
+      const src = document.getElementById('aboutFeedbackSource');
+      if (src) src.value = 'DeskLibrary 桌面版';
+    } else {
+      const msg = (data && data.message) || `发送失败（HTTP ${res.status}）`;
+      if (statusEl) statusEl.textContent = msg;
+      else alert(msg);
+    }
+  } catch (err) {
+    const msg = err && err.message ? err.message : '网络错误';
+    if (statusEl) statusEl.textContent = msg;
+    else alert(msg);
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+});
+
+window.deskLibrary.onSnapshot(applySnapshot);
+window.deskLibrary.getInitialData().then(applySnapshot);

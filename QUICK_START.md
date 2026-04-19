@@ -201,7 +201,7 @@ npm run dev
 
 用户数据保存在：
 ```
-C:\Users\<用户名>\AppData\Roaming\Click2Save\data
+C:\Users\<用户名>\AppData\Roaming\DeskLibrary\data
 ```
 
 包含：

@@ -250,7 +250,7 @@ src/main/browser-node-service.js |  35 +++-
 
 1. **备份数据**（建议）
    ```
-   C:\Users\<用户名>\AppData\Roaming\Click2Save\data
+   C:\Users\<用户名>\AppData\Roaming\DeskLibrary\data
    ```
 
 2. **准备测试账号**

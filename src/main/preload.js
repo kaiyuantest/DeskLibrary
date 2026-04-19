@@ -1,6 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
-contextBridge.exposeInMainWorld('click2save', {
+contextBridge.exposeInMainWorld('deskLibrary', {
   getInitialData: () => ipcRenderer.invoke('get-initial-data'),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   createManualTextRecord: (text) => ipcRenderer.invoke('create-manual-text-record', text),
@@ -43,5 +43,6 @@ contextBridge.exposeInMainWorld('click2save', {
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window-toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
+  openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   onSnapshot: (callback) => ipcRenderer.on('snapshot', (_, payload) => callback(payload))
 });

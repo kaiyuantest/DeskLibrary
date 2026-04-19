@@ -179,7 +179,7 @@ function execFileText(command, args, options = {}) {
 }
 
 function execPowerShell(script, args = [], timeoutMs = 15000) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-ps-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desklibrary-ps-'));
   const scriptPath = path.join(tempDir, 'runner.ps1');
   fs.writeFileSync(scriptPath, script, 'utf8');
   return execFileText(POWERSHELL_PATH, [
@@ -261,7 +261,7 @@ function parseCdpScriptStdoutJson(raw, contextLabel = 'CDP') {
 }
 
 async function withTempCopy(filePath, callback) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-db-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desklibrary-db-'));
   const tempFile = path.join(tempDir, path.basename(filePath));
   try {
     try {
@@ -301,7 +301,7 @@ async function sqliteApplySql(dbPath, sqlScript) {
   if (!fs.existsSync(SQLITE_PATH)) {
     throw new Error('系统缺少 sqlite3.exe，无法写入 Cookie 数据库');
   }
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-sql-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desklibrary-sql-'));
   const sqlFile = path.join(tempDir, 'apply.sql');
   try {
     fs.writeFileSync(sqlFile, sqlScript, 'utf8');
@@ -1412,7 +1412,7 @@ async function rewriteBrowserCardCookies(card, cfg) {
     const resolved = await resolveSelfBuiltCdpPort(String(sourceId || ''), debugPort);
     rewriteDebug = await buildRewriteSelfBuiltDebug(card, sourceId, source, debugPort, resolved);
     // eslint-disable-next-line no-console
-    console.log('[Click2Save][重][自建] CDP/卡片对照', JSON.stringify(rewriteDebug, null, 2));
+    console.log('[DeskLibrary][重][自建] CDP/卡片对照', JSON.stringify(rewriteDebug, null, 2));
     if (!resolved) {
       return {
         ok: false,
@@ -1673,7 +1673,7 @@ async function getDevtoolsWsUrl(port, preferredDomain = '') {
 
 async function readCookiesViaCdp(port, preferredDomain = '') {
   const wsUrl = await getDevtoolsWsUrl(port, preferredDomain);
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-cdp-read-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desklibrary-cdp-read-'));
   const payloadFile = path.join(tempDir, 'payload.json');
   const script = [
     "param([string]$payloadPath)",
@@ -1745,7 +1745,7 @@ async function navigateViaCdp(port, preferredDomain, targetUrl) {
   if (!url) {
     return { ok: false, message: '缺少要打开的地址' };
   }
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-cdp-nav-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desklibrary-cdp-nav-'));
   const payloadFile = path.join(tempDir, 'payload.json');
   const script = [
     "param([string]$payloadPath)",
@@ -1815,7 +1815,7 @@ async function navigateViaCdp(port, preferredDomain, targetUrl) {
 }
 
 async function runCdpScript(payload) {
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-cdp-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desklibrary-cdp-'));
   const payloadFile = path.join(tempDir, 'payload.json');
   const script = [
     "param([string]$payloadPath)",
@@ -2059,7 +2059,7 @@ async function dbWriteCookies(cookieDbPath, cookies, userDataDir) {
     return { ok: false, message: '没有可写入的 Cookie' };
   }
 
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'click2save-dbwrite-'));
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'desklibrary-dbwrite-'));
   const tempDb = path.join(tempDir, path.basename(cookieDbPath));
   try {
     fs.copyFileSync(cookieDbPath, tempDb);

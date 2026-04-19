@@ -99,7 +99,7 @@ def _safe_read_cookie_db(importer, cookie_file: Path, master_key: bytes, domain_
         rows = None
 
     if rows is None:
-        tmp = Path(tempfile.mkdtemp(prefix="click2save-cookie-")) / "Cookies"
+        tmp = Path(tempfile.mkdtemp(prefix="desklibrary-cookie-")) / "Cookies"
         try:
             shutil.copy2(cookie_file, tmp)
             conn = sqlite3.connect(str(tmp), detect_types=sqlite3.PARSE_DECLTYPES)
@@ -171,12 +171,12 @@ def _safe_read_cookie_db(importer, cookie_file: Path, master_key: bytes, domain_
 
 
 def install_importer_patch(importer):
-    if getattr(importer, "_click2save_cookie_patch_installed", False):
+    if getattr(importer, "_desklibrary_cookie_patch_installed", False):
         return importer
     importer._read_cookie_db = lambda cookie_file, master_key, domain_filter="": _safe_read_cookie_db(
         importer, cookie_file, master_key, domain_filter
     )
-    importer._click2save_cookie_patch_installed = True
+    importer._desklibrary_cookie_patch_installed = True
     return importer
 
 

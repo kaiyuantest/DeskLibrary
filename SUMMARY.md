@@ -2,7 +2,7 @@
 
 ## 问题描述
 
-你在使用 Click2Save Electron 应用的浏览器 Cookie 导入和注入功能时遇到了以下问题：
+你在使用 DeskLibrary（桌面收藏工作台）应用的浏览器 Cookie 导入和注入功能时遇到了以下问题：
 
 ### 复现步骤
 
