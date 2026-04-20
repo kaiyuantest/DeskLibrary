@@ -3271,4 +3271,21 @@ window.deskLibrary.onNavigatePage((payload = {}) => {
   if (!allow.has(page)) return;
   switchPage(page);
 });
+window.deskLibrary.onOpenRecordDetail((payload = {}) => {
+  const id = Number(payload.id);
+  if (!Number.isFinite(id) || id <= 0) return;
+  const record = state.records.find((item) => Number(item.id) === id);
+  if (!record) return;
+
+  const requestedPage = String(payload.page || '').trim();
+  const recordPage = (record.category || 'daily') === 'common' ? 'common' : 'daily';
+  const targetPage = requestedPage === 'common' || requestedPage === 'daily' ? requestedPage : recordPage;
+  if (state.currentPage !== targetPage) {
+    switchPage(targetPage);
+  }
+
+  state.selectedRecordId = id;
+  openModal();
+  renderAll();
+});
 window.deskLibrary.getInitialData().then(applySnapshot);

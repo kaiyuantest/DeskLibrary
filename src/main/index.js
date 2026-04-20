@@ -3451,6 +3451,46 @@ function setupIpc() {
     return { ok: true, page: normalizeNavigatePage(page) };
   });
 
+  ipcMain.handle('open-main-window-record-detail', async (_, payload = {}) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false, message: '主窗口不可用' };
+    }
+    const id = Number(payload && payload.id);
+    if (!Number.isFinite(id) || id <= 0) {
+      return { ok: false, message: '记录ID无效' };
+    }
+
+    const allRecords = storage.getAllRecords();
+    const targetRecord = allRecords.find((item) => Number(item.id) === id);
+    if (!targetRecord) {
+      return { ok: false, message: '记录不存在' };
+    }
+
+    const requestedPage = normalizeNavigatePage(payload && payload.page);
+    const page = requestedPage || ((targetRecord.category || 'daily') === 'common' ? 'common' : 'daily');
+
+    closeFloatingMenu();
+    showWindow();
+    navigateMainWindowPage(page);
+
+    const emitDetail = () => {
+      if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.webContents || mainWindow.webContents.isDestroyed()) {
+        return;
+      }
+      mainWindow.webContents.send('open-record-detail', { id, page });
+    };
+
+    if (mainWindow.webContents.isLoadingMainFrame()) {
+      mainWindow.webContents.once('did-finish-load', () => {
+        setTimeout(emitDetail, 90);
+      });
+    } else {
+      setTimeout(emitDetail, 90);
+    }
+
+    return { ok: true, id, page };
+  });
+
   ipcMain.handle('reset-settings', async () => {
     try {
       // 清空已保存设置，让 getSettings() 回落到当前版本默认值。
@@ -3559,6 +3599,74 @@ function setupIpc() {
   ipcMain.handle('floating-quick-save', async () => quickCaptureClipboard({ category: 'daily' }));
 
   ipcMain.handle('floating-quick-save-common', async () => quickCaptureClipboard({ category: 'common' }));
+
+  ipcMain.handle('floating-search-records', async (_, payload = {}) => {
+    const category = payload && String(payload.category || '').trim().toLowerCase() === 'common' ? 'common' : 'daily';
+    const keywordRaw = String((payload && payload.keyword) || '').trim();
+    const keyword = keywordRaw.toLowerCase();
+    const limit = Math.max(1, Math.min(50, Number((payload && payload.limit) || 12)));
+
+    if (!keyword) {
+      return { ok: true, category, keyword: '', results: [] };
+    }
+
+    const allRecords = storage.getAllRecords();
+    const normalizedRecords = allRecords.map((item) => normalizeRecord(item));
+    const scopedRecords = allRecords
+      .map((item, index) => ({ raw: item, normalized: normalizedRecords[index] }))
+      .filter(({ raw, normalized }) => {
+        const rawCategory = String(raw.category || '').trim().toLowerCase();
+        const normalizedCategory = String(normalized.category || 'daily').trim().toLowerCase();
+        const display = String(normalized.categoryDisplay || '').trim();
+        if (category === 'common') {
+          return rawCategory === 'common'
+            || normalizedCategory === 'common'
+            || display === '常用';
+        }
+        return rawCategory !== 'common'
+          && normalizedCategory !== 'common'
+          && display !== '常用';
+      });
+
+    const records = scopedRecords
+      .filter(({ raw, normalized }) => {
+        const haystack = [
+          normalized.displayTitle,
+          normalized.preview,
+          normalized.textContent,
+          normalized.editableNote,
+          normalized.sourceAppDisplay,
+          normalized.windowTitleDisplay,
+          normalized.categoryDisplay,
+          normalized.captureMethodDisplay,
+          raw.title,
+          raw.note,
+          raw.remark
+        ].join('\n').toLowerCase();
+        return haystack.includes(keyword);
+      })
+      .sort((left, right) => {
+        const leftAt = new Date(left.normalized.lastCapturedAt || left.normalized.updatedAt || left.normalized.createdAt).getTime();
+        const rightAt = new Date(right.normalized.lastCapturedAt || right.normalized.updatedAt || right.normalized.createdAt).getTime();
+        return rightAt - leftAt;
+      })
+      .slice(0, limit)
+      .map(({ normalized }) => ({
+        id: normalized.id,
+        title: normalized.displayTitle || '未命名记录',
+        preview: normalized.preview || '',
+        contentType: normalized.contentType || 'text',
+        sourceApp: normalized.sourceAppDisplay || '未知应用',
+        updatedAt: normalized.lastCapturedAt || normalized.updatedAt || normalized.createdAt || ''
+      }));
+
+    return {
+      ok: true,
+      category,
+      keyword: keywordRaw,
+      results: records
+    };
+  });
 
   ipcMain.handle('start-accumulation', async () => startAccumulation());
 

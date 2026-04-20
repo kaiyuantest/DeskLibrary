@@ -24,6 +24,9 @@ class FloatingCircleMenu {
     this.expandingGuard = '';
     this.syntheticIdSeed = 0;
     this.silentClosing = false;
+    this.searchTapAt = {};
+    this.resultTapAt = {};
+    this.searchInputTimer = null;
     this.init();
   }
 
@@ -53,6 +56,9 @@ class FloatingCircleMenu {
       .fm-orb:hover .fm-tip,.fm-orb.active .fm-tip{opacity:1}
       .fm-msg{position:fixed;top:16px;left:50%;transform:translateX(-50%);max-width:90vw;border-radius:8px;padding:8px 10px;color:#e7f0ff;background:rgba(9,19,39,.92);border:1px solid rgba(142,180,245,.34);font:500 12px/1.3 "Microsoft YaHei UI",sans-serif;display:none;z-index:100000}
       .fm-msg.visible{display:block}
+      .fm-search-input{position:fixed;left:24px;top:56px;transform:none;width:220px;height:34px;padding:0 10px;border-radius:18px;border:1px solid rgba(142,180,245,.45);background:rgba(9,19,39,.94);color:#eaf3ff;font:600 13px/1 "Microsoft YaHei UI",sans-serif;outline:none;display:none;z-index:100001}
+      .fm-search-input::placeholder{color:rgba(185,208,247,.7)}
+      .fm-search-input.visible{display:block}
     `;
     document.head.appendChild(style);
   }
@@ -79,17 +85,57 @@ class FloatingCircleMenu {
     this.msg = document.createElement('div');
     this.msg.className = 'fm-msg';
     document.body.appendChild(this.msg);
+
+    this.searchInput = document.createElement('input');
+    this.searchInput.className = 'fm-search-input';
+    this.searchInput.type = 'text';
+    this.searchInput.autocomplete = 'off';
+    this.searchInput.spellcheck = false;
+    this.searchInput.placeholder = '输入关键词，实时搜索';
+    this.searchInput.addEventListener('input', () => {
+      if (!searchInputState.active) return;
+      if (searchInputState.composing) return;
+      const category = this.searchInput.dataset.category === 'common' ? 'common' : (searchInputState.category === 'common' ? 'common' : 'daily');
+      searchInputState.keyword = this.searchInput.value || '';
+      queueSearchApply(category, searchInputState.keyword);
+    });
+    this.searchInput.addEventListener('compositionstart', () => {
+      searchInputState.composing = true;
+    });
+    this.searchInput.addEventListener('compositionend', () => {
+      if (!searchInputState.active) return;
+      searchInputState.composing = false;
+      const category = this.searchInput.dataset.category === 'common' ? 'common' : (searchInputState.category === 'common' ? 'common' : 'daily');
+      searchInputState.keyword = this.searchInput.value || '';
+      queueSearchApply(category, searchInputState.keyword);
+    });
+    this.searchInput.addEventListener('keydown', (event) => {
+      if (!searchInputState.active) return;
+      if (event.isComposing || searchInputState.composing) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        event.stopPropagation();
+        stopSearchInput(true);
+      }
+    });
+    document.body.appendChild(this.searchInput);
     document.body.appendChild(this.root);
   }
 
   bindGlobal() {
     document.addEventListener('click', (event) => {
       if (!this.state.visible) return;
-      if (!this.root.contains(event.target)) {
+      const insideSearchInput = !!(this.searchInput && this.searchInput.contains(event.target));
+      if (!this.root.contains(event.target) && !insideSearchInput) {
         this.hideMenu(true);
       }
     });
     window.addEventListener('keydown', (event) => {
+      if (searchInputState.active) {
+        if (handleSearchInputKeydown(event)) {
+          return;
+        }
+      }
       if (event.key === 'Escape') this.hideMenu(true);
     });
     document.addEventListener('mousemove', (event) => {
@@ -140,6 +186,7 @@ class FloatingCircleMenu {
     this.state.layerAnchors = [{ x: 0, y: 0 }];
     this.state.keepZones = [];
     this.center.textContent = '';
+    this.hideSearchInput();
     if (notifyClose && !this.silentClosing && this.options.onRequestClose) {
       this.options.onRequestClose();
     }
@@ -168,6 +215,110 @@ class FloatingCircleMenu {
     this.state.layerAnchors = [{ x: 0, y: 0 }];
     this.state.keepZones = [];
     this.renderFromDepth(0);
+  }
+
+  openSearchBranch(category) {
+    const groupId = category === 'common' ? 'common' : 'save';
+    const searchId = `search.${category === 'common' ? 'common' : 'daily'}`;
+    const rootChildren = Array.isArray(this.options.tree?.children) ? this.options.tree.children : [];
+    const firstLevel = this.limitLayerNodes(rootChildren, 0);
+    const groupNode = firstLevel.find((item) => item.id === groupId);
+    if (!groupNode) {
+      this.showFirstLayer();
+      return;
+    }
+    const gIdx = firstLevel.findIndex((item) => item.id === groupId);
+    const start = -Math.PI / 2;
+    const gAngle = start + ((Math.PI * 2) * gIdx) / firstLevel.length;
+    const groupAnchor = {
+      x: Math.cos(gAngle) * this.getLayerRadius(0),
+      y: Math.sin(gAngle) * this.getLayerRadius(0)
+    };
+
+    const groupChildren = Array.isArray(groupNode.children) ? groupNode.children : [];
+    const secondLevel = this.limitLayerNodes(groupChildren, 1);
+    const searchNode = secondLevel.find((item) => item.id === searchId);
+    if (!searchNode) {
+      this.state.activePath = [groupNode];
+      this.state.layerAnchors = [{ x: 0, y: 0 }, groupAnchor];
+      this.state.keepZones = [this.makeKeepZone(0, groupAnchor)];
+      this.renderFromDepth(1);
+      return;
+    }
+
+    const sIdx = secondLevel.findIndex((item) => item.id === searchId);
+    const spread = (Math.PI / 180) * 110;
+    const outwardAngle = Math.atan2(groupAnchor.y, groupAnchor.x);
+    const sAngle = outwardAngle - (spread / 2) + ((secondLevel.length === 1 ? 0 : spread / (secondLevel.length - 1)) * sIdx);
+    const searchAnchor = {
+      x: groupAnchor.x + (Math.cos(sAngle) * this.getLayerRadius(1)),
+      y: groupAnchor.y + (Math.sin(sAngle) * this.getLayerRadius(1))
+    };
+
+    this.state.activePath = [groupNode, searchNode];
+    this.state.layerAnchors = [{ x: 0, y: 0 }, groupAnchor, searchAnchor];
+    this.state.keepZones = [this.makeKeepZone(0, groupAnchor), this.makeKeepZone(1, searchAnchor)];
+    this.renderFromDepth(2);
+    this.positionSearchInputByNodeId(searchId);
+  }
+
+  findOrbByNodeId(nodeId) {
+    if (!nodeId) return null;
+    const orbs = this.root.querySelectorAll('.fm-orb');
+    for (const orb of orbs) {
+      if (String(orb.dataset.nodeId || '') === String(nodeId)) {
+        return orb;
+      }
+    }
+    return null;
+  }
+
+  positionSearchInputByNodeId(nodeId) {
+    if (!this.searchInput) return;
+    const orb = this.findOrbByNodeId(nodeId);
+    if (!orb) return;
+    const rect = orb.getBoundingClientRect();
+    const inputWidth = 220;
+    const inputHeight = 34;
+    const margin = 8;
+    let left = rect.right + 10;
+    let top = rect.top + (rect.height / 2) - (inputHeight / 2);
+
+    if (left + inputWidth > window.innerWidth - margin) {
+      left = rect.left - inputWidth - 10;
+    }
+    left = Math.max(margin, Math.min(window.innerWidth - inputWidth - margin, left));
+    top = Math.max(margin, Math.min(window.innerHeight - inputHeight - margin, top));
+
+    this.searchInput.style.left = `${Math.round(left)}px`;
+    this.searchInput.style.top = `${Math.round(top)}px`;
+  }
+
+  showSearchInput(value = '', category = 'daily') {
+    if (!this.searchInput) return;
+    const normalized = category === 'common' ? 'common' : 'daily';
+    this.searchInput.classList.add('visible');
+    this.searchInput.value = String(value || '');
+    this.searchInput.dataset.category = normalized;
+    this.searchInput.placeholder = normalized === 'common' ? '搜索常用内容，自动出结果' : '搜索每日内容，自动出结果';
+    const nodeId = normalized === 'common' ? 'search.common' : 'search.daily';
+    this.positionSearchInputByNodeId(nodeId);
+    setTimeout(() => {
+      try {
+        this.searchInput.focus();
+        const len = this.searchInput.value.length;
+        this.searchInput.setSelectionRange(len, len);
+      } catch {}
+    }, 0);
+  }
+
+  hideSearchInput() {
+    if (!this.searchInput) return;
+    this.searchInput.classList.remove('visible');
+    this.searchInput.value = '';
+    this.searchInput.dataset.category = '';
+    this.searchInput.placeholder = '输入关键词，实时搜索';
+    this.searchInput.blur();
   }
 
   nodeAtDepth(depth) {
@@ -237,6 +388,7 @@ class FloatingCircleMenu {
       if (item.danger) orb.classList.add('danger');
       orb.type = 'button';
       orb.dataset.depth = String(depth);
+      orb.dataset.nodeId = String(item.id || '');
       orb.textContent = item.label || '?';
       orb.style.setProperty('--dx', `${x}px`);
       orb.style.setProperty('--dy', `${y}px`);
@@ -279,6 +431,8 @@ class FloatingCircleMenu {
 
   bindOrbInteraction(orb, item, depth) {
     const hasChildren = Array.isArray(item.children) && item.children.length > 0;
+    const isSearchNode = !!(item && item.action && item.action.type === 'search-records');
+    const isSearchResultNode = /^search\.(daily|common)\.\d+$/.test(String(item && item.id ? item.id : ''));
     let touchMoved = false;
 
     const expand = () => {
@@ -300,12 +454,12 @@ class FloatingCircleMenu {
     };
 
     orb.addEventListener('mouseenter', () => {
-      if (hasChildren) expand();
+      if (hasChildren && !isSearchNode) expand();
     });
 
     orb.addEventListener('touchstart', (e) => {
       touchMoved = false;
-      if (hasChildren) {
+      if (hasChildren && !isSearchNode) {
         e.preventDefault();
         e.stopPropagation();
         expand();
@@ -313,7 +467,7 @@ class FloatingCircleMenu {
     }, { passive: false });
 
     orb.addEventListener('pointerdown', (e) => {
-      if (!hasChildren) return;
+      if (!hasChildren || isSearchNode) return;
       if (e.pointerType && e.pointerType !== 'mouse') return;
       e.preventDefault();
       e.stopPropagation();
@@ -325,6 +479,14 @@ class FloatingCircleMenu {
     }, { passive: true });
 
     this.bindTap(orb, () => {
+      if (isSearchNode) {
+        this.handleSearchNodeTap(item, expand);
+        return;
+      }
+      if (isSearchResultNode) {
+        this.handleSearchResultTap(item, expand);
+        return;
+      }
       if (hasChildren) {
         expand();
         return;
@@ -332,6 +494,53 @@ class FloatingCircleMenu {
       if (touchMoved) return;
       this.executeLeaf(item);
     });
+  }
+
+  handleSearchNodeTap(item, expand) {
+    const key = String(item.id || 'search-node');
+    const now = Date.now();
+    const last = Number(this.searchTapAt[key] || 0);
+    this.searchTapAt[key] = now;
+
+    if (now - last <= 300) {
+      this.searchTapAt[key] = 0;
+      startSearchInput(item.action && item.action.category ? item.action.category : 'daily');
+      return;
+    }
+
+    if (typeof expand === 'function') {
+      expand();
+    }
+  }
+
+  async handleSearchResultTap(item, expand) {
+    const key = String(item.id || 'search-result');
+    const now = Date.now();
+    const last = Number(this.resultTapAt[key] || 0);
+    this.resultTapAt[key] = now;
+
+    if (now - last <= 320) {
+      this.resultTapAt[key] = 0;
+      const action = item.action && item.action.type === 'open-record-detail'
+        ? item.action
+        : { type: 'open-record-detail', id: Number(String(item.id || '').split('.').pop() || 0), page: 'daily' };
+      const result = await runFloatingAction(action, item);
+      const msg = result && result.message ? result.message : `执行：${item.label || '动作'}`;
+      this.showMessage(msg);
+      this.options.onAction({
+        node: item,
+        action,
+        message: msg,
+        ok: result ? result.ok !== false : true,
+        time: new Date().toISOString()
+      });
+      if (this.options.closeAfterLeaf && !(result && result.keepOpen)) this.hideMenu(true);
+      return;
+    }
+
+    if (typeof expand === 'function') {
+      expand();
+    }
   }
 
   getLayerRadius(depth) {
@@ -406,7 +615,7 @@ class FloatingCircleMenu {
       ok: result ? result.ok !== false : true,
       time: new Date().toISOString()
     });
-    if (this.options.closeAfterLeaf) this.hideMenu(true);
+    if (this.options.closeAfterLeaf && !(result && result.keepOpen)) this.hideMenu(true);
   }
 
   showMessage(text) {
@@ -441,6 +650,52 @@ function buildRecordNode(record, category) {
       commonAction,
       { id: `rec.${id}.delete`, label: '删除', action: { type: 'delete-record', id, title }, danger: true }
     ]
+  };
+}
+
+function buildSearchResultNode(record, category) {
+  const id = Number(record.id);
+  const title = String(record.title || '未命名').trim() || '未命名';
+  return {
+    id: `search.${category}.${id}`,
+    label: shortLabel(title, 6),
+    tip: String(record.preview || '').trim() || title,
+    action: { type: 'open-record-detail', id, page: category },
+    children: [
+      { id: `search.${category}.${id}.copy`, label: '复制', action: { type: 'copy-record', id, title } },
+      category === 'daily'
+        ? { id: `search.${category}.${id}.toCommon`, label: '转常', action: { type: 'move-common', id, title } }
+        : { id: `search.${category}.${id}.toDaily`, label: '回每', action: { type: 'move-daily', id, title } },
+      { id: `search.${category}.${id}.delete`, label: '删除', action: { type: 'delete-record', id, title }, danger: true }
+    ]
+  };
+}
+
+function buildSearchBranch(category) {
+  const current = category === 'common' ? searchState.common : searchState.daily;
+  const isActive = searchInputState.active && searchInputState.category === category;
+  const typingKeyword = isActive ? searchInputState.keyword : current.keyword;
+  const label = typingKeyword ? `搜:${shortLabel(typingKeyword, 4)}` : '搜索';
+  const children = [];
+  if (current.keyword) {
+    children.push({ id: `search.${category}.clear`, label: '清空', action: { type: 'clear-search-records', category } });
+  }
+  if (Array.isArray(current.results) && current.results.length) {
+    current.results.forEach((item) => {
+      children.push(buildSearchResultNode(item, category));
+    });
+  } else if (current.keyword) {
+    children.push({ id: `search.${category}.empty`, label: '无结果', action: { type: 'noop', message: `未找到“${current.keyword}”` } });
+  }
+
+  return {
+    id: `search.${category}`,
+    label,
+    tip: isActive
+      ? `输入中：${typingKeyword || '...'}（Esc 取消）`
+      : `${category === 'common' ? '搜索常用记录' : '搜索每日记录'}（双击输入）`,
+    action: { type: 'search-records', category },
+    children
   };
 }
 
@@ -487,7 +742,8 @@ function buildMenuTree(payload = {}) {
             children: recentDaily.length
               ? recentDaily.map((item) => buildRecordNode(item, 'daily'))
               : [{ id: 'save.empty', label: '空', action: { type: 'noop', message: '最近没有每日记录' } }]
-          }
+          },
+          buildSearchBranch('daily')
         ]
       },
       {
@@ -502,7 +758,8 @@ function buildMenuTree(payload = {}) {
             children: recentCommon.length
               ? recentCommon.map((item) => buildRecordNode(item, 'common'))
               : [{ id: 'common.empty', label: '空', action: { type: 'noop', message: '最近没有常用记录' } }]
-          }
+          },
+          buildSearchBranch('common')
         ]
       },
       {
@@ -589,6 +846,32 @@ async function runFloatingAction(action, node) {
         ? { ok: false, message: result.message || '跳转失败' }
         : { ok: true, message: '已跳转到目标页面' };
     }
+    case 'open-record-detail': {
+      const id = Number(action.id);
+      const page = String(action.page || '').trim();
+      if (!Number.isFinite(id) || id <= 0) {
+        return { ok: false, message: '记录ID无效' };
+      }
+      const result = await window.deskLibraryFloating.openMainWindowRecordDetail({ id, page });
+      return result && result.ok === false
+        ? { ok: false, message: result.message || '打开详情失败' }
+        : { ok: true, message: '已打开记录详情' };
+    }
+    case 'search-records': {
+      const category = action && action.category === 'common' ? 'common' : 'daily';
+      startSearchInput(category);
+      return { ok: true, message: '已进入搜索输入', keepOpen: true };
+    }
+    case 'clear-search-records': {
+      const category = action && action.category === 'common' ? 'common' : 'daily';
+      if (category === 'common') {
+        searchState.common = { keyword: '', results: [] };
+      } else {
+        searchState.daily = { keyword: '', results: [] };
+      }
+      applyMenuState({ ...latestPayload, open: true });
+      return { ok: true, message: '已清空搜索', keepOpen: true };
+    }
     case 'quick-save-daily':
       await window.deskLibraryFloating.quickSave();
       return { ok: true, message: '已收藏到每日' };
@@ -662,6 +945,120 @@ async function runFloatingAction(action, node) {
 
 let latestPayload = {};
 let lastTreeSignature = '';
+const searchState = {
+  daily: { keyword: '', results: [] },
+  common: { keyword: '', results: [] }
+};
+const searchInputState = {
+  active: false,
+  category: 'daily',
+  keyword: '',
+  composing: false
+};
+
+async function performSearch(category, keyword) {
+  const normalizedCategory = category === 'common' ? 'common' : 'daily';
+  const trimmed = String(keyword || '').trim();
+  if (normalizedCategory === 'common') {
+    searchState.common.keyword = trimmed;
+  } else {
+    searchState.daily.keyword = trimmed;
+  }
+
+  if (!trimmed) {
+    if (normalizedCategory === 'common') {
+      searchState.common.results = [];
+    } else {
+      searchState.daily.results = [];
+    }
+    applyMenuState({ ...latestPayload, open: true });
+    return { ok: true, count: 0 };
+  }
+
+  const result = await window.deskLibraryFloating.searchRecords({
+    category: normalizedCategory,
+    keyword: trimmed,
+    limit: 12
+  });
+  if (!result || result.ok === false) {
+    return { ok: false, message: (result && result.message) || '搜索失败' };
+  }
+  const list = Array.isArray(result.results) ? result.results : [];
+  if (normalizedCategory === 'common') {
+    searchState.common.results = list;
+  } else {
+    searchState.daily.results = list;
+  }
+  applyMenuState({ ...latestPayload, open: true });
+  return { ok: true, count: list.length };
+}
+
+function stopSearchInput(cancelOnly = false, keepMenuOpen = true) {
+  if (!searchInputState.active) return;
+  searchInputState.active = false;
+  searchInputState.composing = false;
+  const category = searchInputState.category;
+  searchInputState.keyword = '';
+  if (menu.searchInputTimer) {
+    clearTimeout(menu.searchInputTimer);
+    menu.searchInputTimer = null;
+  }
+  menu.hideSearchInput();
+  if (keepMenuOpen) {
+    applyMenuState({ ...latestPayload, open: true });
+  }
+  if (!cancelOnly) {
+    const current = category === 'common' ? searchState.common : searchState.daily;
+    menu.showMessage(`搜索完成：${current.results.length} 条`);
+  } else {
+    menu.showMessage('已取消搜索输入');
+  }
+}
+
+function queueSearchApply(category, keyword) {
+  if (menu.searchInputTimer) {
+    clearTimeout(menu.searchInputTimer);
+    menu.searchInputTimer = null;
+  }
+  menu.searchInputTimer = setTimeout(async () => {
+    menu.searchInputTimer = null;
+    const result = await performSearch(category, keyword);
+    if (!result.ok) {
+      menu.showMessage(result.message || '搜索失败');
+    }
+  }, 120);
+}
+
+function startSearchInput(category) {
+  const normalized = category === 'common' ? 'common' : 'daily';
+  const current = normalized === 'common' ? searchState.common : searchState.daily;
+  searchInputState.active = true;
+  searchInputState.category = normalized;
+  searchInputState.keyword = current.keyword || '';
+  applyMenuState({ ...latestPayload, open: true });
+  menu.openSearchBranch(normalized);
+  menu.showSearchInput(searchInputState.keyword || '', normalized);
+  menu.showMessage(`输入关键词：${searchInputState.keyword || ''}`);
+}
+
+function handleSearchInputKeydown(event) {
+  if (document.activeElement === menu.searchInput) {
+    return false;
+  }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    stopSearchInput(true);
+    return true;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    event.stopPropagation();
+    stopSearchInput(false);
+    return true;
+  }
+  return false;
+}
 
 const menu = new FloatingCircleMenu({
   baseRadius: 88,
@@ -679,7 +1076,9 @@ function applyMenuState(payload = {}) {
     acc: !!(latestPayload.accumulation && latestPayload.accumulation.active),
     lastCapture: latestPayload.lastCapture && latestPayload.lastCapture.preview ? latestPayload.lastCapture.preview : '',
     recentDaily: (latestPayload.recentDailyRecords || []).map((item) => `${item.id}:${item.title || ''}:${item.preview || ''}`),
-    recentCommon: (latestPayload.recentCommonRecords || []).map((item) => `${item.id}:${item.title || ''}:${item.preview || ''}`)
+    recentCommon: (latestPayload.recentCommonRecords || []).map((item) => `${item.id}:${item.title || ''}:${item.preview || ''}`),
+    searchDaily: `${searchState.daily.keyword}|${(searchState.daily.results || []).map((item) => item.id).join(',')}`,
+    searchCommon: `${searchState.common.keyword}|${(searchState.common.results || []).map((item) => item.id).join(',')}`
   });
 
   menu.silentClosing = true;
@@ -693,7 +1092,13 @@ function applyMenuState(payload = {}) {
     if (!menu.state.visible) {
       menu.showMenu();
     }
+    if (searchInputState.active) {
+      const category = searchInputState.category === 'common' ? 'common' : 'daily';
+      menu.openSearchBranch(category);
+      menu.showSearchInput(searchInputState.keyword || '', category);
+    }
   } else {
+    stopSearchInput(true, false);
     if (menu.state.visible) {
       menu.hideMenu(false);
     }

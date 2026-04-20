@@ -52,5 +52,6 @@ contextBridge.exposeInMainWorld('deskLibrary', {
   closeWindow: () => ipcRenderer.invoke('window-close'),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
   onSnapshot: (callback) => ipcRenderer.on('snapshot', (_, payload) => callback(payload)),
-  onNavigatePage: (callback) => ipcRenderer.on('navigate-page', (_, payload) => callback(payload))
+  onNavigatePage: (callback) => ipcRenderer.on('navigate-page', (_, payload) => callback(payload)),
+  onOpenRecordDetail: (callback) => ipcRenderer.on('open-record-detail', (_, payload) => callback(payload))
 });
