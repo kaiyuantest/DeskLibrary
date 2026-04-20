@@ -123,4 +123,5 @@ body {
 .menu-action.orb-start { --dx: 0px; --dy: 86px; }
 .menu-action.orb-undo { --dx: -60px; --dy: 60px; }
 .menu-action.orb-cancel { --dx: -86px; --dy: 0px; }
+.menu-action.orb-ocr { --dx: 86px; --dy: 86px; }
 .menu-action.orb-hide { --dx: -60px; --dy: -60px; }

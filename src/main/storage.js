@@ -64,7 +64,13 @@ class StorageService {
       pythonCookieProjectPath: DEFAULT_PYTHON_COOKIE_PROJECT,
       bitApiUrl: 'http://127.0.0.1:54345',
       bitApiToken: '',
-      assetBackupPath: ''
+      assetBackupPath: '',
+      screenshotTranslateProvider: 'auto',
+      screenshotTranslateCustomUrl: '',
+      screenshotTranslateCustomMethod: 'POST',
+      screenshotTranslateCustomHeaders: '',
+      screenshotOcrApiKey: '',
+      screenshotOcrLang: 'eng'
     });
     this.ensureFile(this.duplicateFile, {});
   }
@@ -238,6 +244,12 @@ class StorageService {
       bitApiUrl: 'http://127.0.0.1:54345',
       bitApiToken: '',
       assetBackupPath: '',
+      screenshotTranslateProvider: 'auto',
+      screenshotTranslateCustomUrl: '',
+      screenshotTranslateCustomMethod: 'POST',
+      screenshotTranslateCustomHeaders: '',
+      screenshotOcrApiKey: '',
+      screenshotOcrLang: 'eng',
       ...raw,
       selfBuiltWorkspaceDir,
       browserScanRoot: selfBuiltWorkspaceDir,

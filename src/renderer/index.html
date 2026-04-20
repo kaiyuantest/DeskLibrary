@@ -371,6 +371,53 @@
                   </div>
                 </div>
 
+                <div class="settings-subhead">截图翻译 API 配置</div>
+
+                <div class="settings-key-row">
+                  <span>翻译模式 <button type="button" class="setting-help-btn" data-help-key="translateApi" title="查看说明">!</button></span>
+                  <div class="setting-path-input-group">
+                    <select id="screenshotTranslateProviderSelect">
+                      <option value="auto">默认公共 API（自动回退）</option>
+                      <option value="custom">仅使用自定义 API</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div class="settings-key-row">
+                  <span>自定义翻译 URL <button type="button" class="setting-help-btn" data-help-key="translateCustomUrl" title="查看说明">!</button></span>
+                  <div class="setting-path-input-group">
+                    <input id="screenshotTranslateCustomUrlInput" type="text" placeholder="例如 https://api.example.com/translate" />
+                  </div>
+                </div>
+
+                <div class="settings-key-row">
+                  <span>自定义翻译 Method</span>
+                  <div class="setting-path-input-group">
+                    <input id="screenshotTranslateCustomMethodInput" type="text" placeholder="POST / GET（默认 POST）" />
+                  </div>
+                </div>
+
+                <div class="settings-key-row">
+                  <span>自定义翻译 Headers(JSON)</span>
+                  <div class="setting-path-input-group">
+                    <input id="screenshotTranslateCustomHeadersInput" type="text" placeholder='例如 {"Authorization":"Bearer token"}' />
+                  </div>
+                </div>
+
+                <div class="settings-key-row">
+                  <span>OCR API Key <button type="button" class="setting-help-btn" data-help-key="ocrApi" title="查看说明">!</button></span>
+                  <div class="setting-path-input-group">
+                    <input id="screenshotOcrApiKeyInput" type="text" placeholder="留空使用公共 demo key (helloworld)" />
+                  </div>
+                </div>
+
+                <div class="settings-key-row">
+                  <span>OCR 语言</span>
+                  <div class="setting-path-input-group">
+                    <input id="screenshotOcrLangInput" type="text" placeholder="例如 eng / chi_sim，默认 eng" />
+                  </div>
+                </div>
+
                 <p class="settings-hint">保存后重新注册全局快捷键；若与系统或其它软件冲突可能无法注册。开机启动通常需下次登录系统后验证。备份路径修改后，新导入的资源将保存到新路径。</p>
                 <div class="settings-actions">
                   <button id="resetSettingsBtn" class="text-action danger" type="button">还原设置</button>

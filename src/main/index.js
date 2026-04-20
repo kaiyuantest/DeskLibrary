@@ -1,5 +1,5 @@
 const { execFileSync } = require('child_process');
-const { app, BrowserWindow, Tray, Menu, globalShortcut, clipboard, nativeImage, ipcMain, Notification, shell, screen, dialog } = require('electron');
+const { app, BrowserWindow, Tray, Menu, globalShortcut, clipboard, nativeImage, ipcMain, Notification, shell, screen, dialog, desktopCapturer } = require('electron');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
@@ -48,6 +48,9 @@ const ACTIVE_WINDOW_HELPER_PATH = path.join(__dirname, 'bin', 'ActiveWindowInfo.
 let mainWindow = null;
 let floatingWindow = null;
 let floatingMenuWindow = null;
+let screenshotSelectionWindow = null;
+let screenshotResultWindow = null;
+let lastScreenshotResultPayload = null;
 let tray = null;
 let storage = null;
 let lastClipboardSignature = '';
@@ -83,6 +86,424 @@ let mainWindowDockCache = null;
 let mainWindowHideTimer = null;
 let hoverSyncTimer = null;
 let registeredGlobalAccelerators = [];
+
+function getApiConfigPath() {
+  return path.join(app.getPath('userData'), 'api-config.json');
+}
+
+function ensureApiConfigTemplate() {
+  const configPath = getApiConfigPath();
+  if (fs.existsSync(configPath)) return configPath;
+  const template = {
+    ocr: {
+      url: 'https://api.ocr.space/parse/image',
+      apiKey: 'helloworld',
+      language: 'eng'
+    },
+    translate: {
+      provider: 'auto',
+      customUrl: '',
+      customHeaders: {},
+      customMethod: 'POST'
+    }
+  };
+  try {
+    fs.writeFileSync(configPath, `${JSON.stringify(template, null, 2)}\n`, 'utf8');
+  } catch {}
+  return configPath;
+}
+
+function readApiConfig() {
+  const configPath = ensureApiConfigTemplate();
+  try {
+    const raw = fs.readFileSync(configPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function getScreenshotApiConfig() {
+  const settings = getSettings();
+  const fileConfig = readApiConfig();
+  const ocr = fileConfig.ocr && typeof fileConfig.ocr === 'object' ? fileConfig.ocr : {};
+  const translate = fileConfig.translate && typeof fileConfig.translate === 'object' ? fileConfig.translate : {};
+
+  let settingHeaders = {};
+  try {
+    const rawHeaders = String(settings.screenshotTranslateCustomHeaders || '').trim();
+    settingHeaders = rawHeaders ? JSON.parse(rawHeaders) : {};
+  } catch {
+    settingHeaders = {};
+  }
+
+  return {
+    ocr: {
+      url: String(
+        process.env.DESKLIB_OCR_URL
+        || settings.screenshotOcrUrl
+        || ocr.url
+        || 'https://api.ocr.space/parse/image'
+      ).trim(),
+      apiKey: String(
+        process.env.DESKLIB_OCR_KEY
+        || settings.screenshotOcrApiKey
+        || ocr.apiKey
+        || 'helloworld'
+      ).trim(),
+      language: String(
+        process.env.DESKLIB_OCR_LANG
+        || settings.screenshotOcrLang
+        || ocr.language
+        || 'eng'
+      ).trim() || 'eng'
+    },
+    translate: {
+      provider: String(
+        process.env.DESKLIB_TRANSLATE_PROVIDER
+        || settings.screenshotTranslateProvider
+        || translate.provider
+        || 'auto'
+      ).trim().toLowerCase(),
+      customUrl: String(
+        process.env.DESKLIB_TRANSLATE_URL
+        || settings.screenshotTranslateCustomUrl
+        || translate.customUrl
+        || ''
+      ).trim(),
+      customMethod: String(
+        process.env.DESKLIB_TRANSLATE_METHOD
+        || settings.screenshotTranslateCustomMethod
+        || translate.customMethod
+        || 'POST'
+      ).trim().toUpperCase(),
+      customHeaders: (settingHeaders && typeof settingHeaders === 'object' ? settingHeaders : null)
+        || (translate.customHeaders && typeof translate.customHeaders === 'object' ? translate.customHeaders : {})
+    }
+  };
+}
+
+function closeScreenshotSelectionWindow() {
+  if (!screenshotSelectionWindow || screenshotSelectionWindow.isDestroyed()) return;
+  screenshotSelectionWindow.destroy();
+  screenshotSelectionWindow = null;
+}
+
+function closeScreenshotResultWindow() {
+  if (!screenshotResultWindow || screenshotResultWindow.isDestroyed()) return;
+  screenshotResultWindow.destroy();
+  screenshotResultWindow = null;
+}
+
+function openScreenshotSelectionWindow() {
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
+  const bounds = display.bounds;
+
+  closeScreenshotSelectionWindow();
+  screenshotSelectionWindow = new BrowserWindow({
+    x: bounds.x,
+    y: bounds.y,
+    width: bounds.width,
+    height: bounds.height,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    minimizable: false,
+    maximizable: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    focusable: true,
+    hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'screenshot-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  screenshotSelectionWindow.loadFile(path.join(__dirname, '../renderer/screenshot-select.html'));
+  screenshotSelectionWindow.once('ready-to-show', () => {
+    if (!screenshotSelectionWindow || screenshotSelectionWindow.isDestroyed()) return;
+    screenshotSelectionWindow.show();
+    screenshotSelectionWindow.focus();
+    screenshotSelectionWindow.webContents.send('screenshot-selection-init', { displayBounds: bounds });
+  });
+  screenshotSelectionWindow.on('closed', () => {
+    screenshotSelectionWindow = null;
+  });
+}
+
+async function captureScreenRegion(selection = {}) {
+  const x = Math.round(Number(selection.x) || 0);
+  const y = Math.round(Number(selection.y) || 0);
+  const width = Math.max(1, Math.round(Number(selection.width) || 1));
+  const height = Math.max(1, Math.round(Number(selection.height) || 1));
+  const targetRect = { x, y, width, height };
+  const display = screen.getDisplayMatching(targetRect);
+  const displayBounds = display.bounds;
+  const captureWidth = Math.max(1, displayBounds.width);
+  const captureHeight = Math.max(1, displayBounds.height);
+
+  const sources = await desktopCapturer.getSources({
+    types: ['screen'],
+    thumbnailSize: { width: captureWidth, height: captureHeight }
+  });
+
+  const displayId = String(display.id);
+  const source = sources.find((item) => String(item.display_id || '') === displayId) || sources[0];
+  if (!source || !source.thumbnail || source.thumbnail.isEmpty()) {
+    throw new Error('无法获取屏幕截图');
+  }
+
+  const thumb = source.thumbnail;
+  const thumbSize = thumb.getSize();
+  const scaleX = thumbSize.width / displayBounds.width;
+  const scaleY = thumbSize.height / displayBounds.height;
+
+  const cropX = Math.max(0, Math.round((x - displayBounds.x) * scaleX));
+  const cropY = Math.max(0, Math.round((y - displayBounds.y) * scaleY));
+  const cropW = Math.max(1, Math.round(width * scaleX));
+  const cropH = Math.max(1, Math.round(height * scaleY));
+  const maxW = Math.max(1, thumbSize.width - cropX);
+  const maxH = Math.max(1, thumbSize.height - cropY);
+  const cropped = thumb.crop({
+    x: cropX,
+    y: cropY,
+    width: Math.min(cropW, maxW),
+    height: Math.min(cropH, maxH)
+  });
+  return cropped.toDataURL();
+}
+
+async function runOcrWithPublicApi(imageDataUrl) {
+  const config = getScreenshotApiConfig();
+  const body = new URLSearchParams();
+  body.set('apikey', config.ocr.apiKey || 'helloworld');
+  body.set('language', config.ocr.language || 'eng');
+  body.set('isOverlayRequired', 'false');
+  body.set('base64Image', imageDataUrl);
+
+  const response = await fetch(config.ocr.url || 'https://api.ocr.space/parse/image', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    body: body.toString()
+  });
+
+  if (!response.ok) {
+    throw new Error(`OCR 请求失败(${response.status})`);
+  }
+
+  const data = await response.json();
+  const parsed = Array.isArray(data?.ParsedResults) ? data.ParsedResults : [];
+  const text = parsed.map((item) => String(item?.ParsedText || '').trim()).filter(Boolean).join('\n');
+  return text;
+}
+
+async function translateWithGoogle(text, targetLang) {
+  const sourceText = String(text || '').trim();
+  if (!sourceText) return '';
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${encodeURIComponent(targetLang)}&dt=t&q=${encodeURIComponent(sourceText)}`;
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'DeskLibrary/1.0'
+    }
+  });
+  if (!response.ok) {
+    throw new Error(`Google 翻译失败(${response.status})`);
+  }
+  const data = await response.json();
+  const translated = Array.isArray(data?.[0])
+    ? data[0].map((segment) => Array.isArray(segment) ? String(segment[0] || '') : '').join('')
+    : '';
+  return translated.trim();
+}
+
+async function translateWithMyMemory(text, targetLang) {
+  const sourceText = String(text || '').trim();
+  if (!sourceText) return '';
+  const targetNorm = String(targetLang || 'zh-CN').trim().toLowerCase();
+  const target = targetNorm.startsWith('zh') ? 'zh-CN' : (targetNorm.split('-')[0] || 'en');
+  const hasCJK = /[\u3400-\u9fff]/.test(sourceText);
+  const source = hasCJK ? 'zh-CN' : 'en';
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(sourceText)}&langpair=${encodeURIComponent(`${source}|${target}`)}`;
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`MyMemory 翻译失败(${response.status})`);
+  }
+  const data = await response.json();
+  const translated = String(data?.responseData?.translatedText || '').trim();
+  if (!translated) {
+    throw new Error('MyMemory 未返回翻译结果');
+  }
+  return translated;
+}
+
+async function translateWithCustomApi(text, targetLang, config) {
+  const customUrl = String(config?.translate?.customUrl || '').trim();
+  if (!customUrl) {
+    throw new Error('未配置自定义翻译 API');
+  }
+  const method = String(config?.translate?.customMethod || 'POST').toUpperCase();
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(config?.translate?.customHeaders || {})
+  };
+  const payload = {
+    text: String(text || ''),
+    source: 'auto',
+    target: String(targetLang || 'zh-CN')
+  };
+
+  const response = await fetch(customUrl, {
+    method,
+    headers,
+    body: method === 'GET' ? undefined : JSON.stringify(payload)
+  });
+  if (!response.ok) {
+    throw new Error(`自定义翻译 API 失败(${response.status})`);
+  }
+  const data = await response.json();
+  const translatedText = String(
+    data?.translatedText
+      || data?.translation
+      || data?.data?.translatedText
+      || ''
+  ).trim();
+  if (!translatedText) {
+    throw new Error('自定义翻译 API 未返回 translatedText');
+  }
+  return translatedText;
+}
+
+function splitTextForTranslation(text, maxChunkLen = 380) {
+  const normalized = String(text || '').replace(/\r/g, '');
+  if (!normalized) return [];
+  if (normalized.length <= maxChunkLen) return [normalized];
+  const lines = normalized.split('\n');
+  const chunks = [];
+  let current = '';
+  for (const line of lines) {
+    const next = current ? `${current}\n${line}` : line;
+    if (next.length <= maxChunkLen) {
+      current = next;
+      continue;
+    }
+    if (current) {
+      chunks.push(current);
+      current = '';
+    }
+    if (line.length <= maxChunkLen) {
+      current = line;
+      continue;
+    }
+    let i = 0;
+    while (i < line.length) {
+      chunks.push(line.slice(i, i + maxChunkLen));
+      i += maxChunkLen;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks.filter(Boolean);
+}
+
+async function translateSingleChunk(sourceText, targetLang, config) {
+  const provider = config.translate.provider || 'auto';
+  const errors = [];
+  if (provider === 'custom') {
+    return translateWithCustomApi(sourceText, targetLang, config);
+  }
+  if (config.translate.customUrl) {
+    try {
+      return await translateWithCustomApi(sourceText, targetLang, config);
+    } catch (error) {
+      errors.push(error && error.message ? error.message : 'custom failed');
+    }
+  }
+  try {
+    return await translateWithGoogle(sourceText, targetLang);
+  } catch (error) {
+    errors.push(error && error.message ? error.message : 'google failed');
+  }
+  try {
+    return await translateWithMyMemory(sourceText, targetLang);
+  } catch (error) {
+    errors.push(error && error.message ? error.message : 'mymemory failed');
+  }
+  throw new Error(errors.join(' | ') || '翻译失败');
+}
+
+async function translateTextWithPublicApi(text, targetLang = 'zh-CN') {
+  const sourceText = String(text || '').trim();
+  if (!sourceText) return '';
+  const config = getScreenshotApiConfig();
+  const chunks = splitTextForTranslation(sourceText, 380);
+  if (!chunks.length) return '';
+  const translatedChunks = [];
+  for (const chunk of chunks) {
+    const translated = await translateSingleChunk(chunk, targetLang, config);
+    translatedChunks.push(translated);
+  }
+  return translatedChunks.join('\n');
+}
+
+function showScreenshotResultWindow(selection, imageDataUrl, ocrText) {
+  const display = screen.getDisplayMatching(selection);
+  const workArea = display.workArea;
+  const width = 460;
+  const height = 560;
+  const nextX = Math.max(workArea.x, Math.min(
+    selection.x + selection.width + 10,
+    workArea.x + workArea.width - width
+  ));
+  const nextY = Math.max(workArea.y, Math.min(
+    selection.y,
+    workArea.y + workArea.height - height
+  ));
+
+  lastScreenshotResultPayload = { imageDataUrl, ocrText };
+
+  if (!screenshotResultWindow || screenshotResultWindow.isDestroyed()) {
+    screenshotResultWindow = new BrowserWindow({
+      x: nextX,
+      y: nextY,
+      width,
+      height,
+      frame: false,
+      transparent: true,
+      resizable: true,
+      minimizable: false,
+      maximizable: false,
+      alwaysOnTop: true,
+      skipTaskbar: true,
+      hasShadow: true,
+      webPreferences: {
+        preload: path.join(__dirname, 'screenshot-preload.js'),
+        contextIsolation: true,
+        nodeIntegration: false
+      }
+    });
+    screenshotResultWindow.loadFile(path.join(__dirname, '../renderer/screenshot-result.html'));
+    screenshotResultWindow.on('closed', () => {
+      screenshotResultWindow = null;
+      lastScreenshotResultPayload = null;
+    });
+    screenshotResultWindow.webContents.once('did-finish-load', () => {
+      if (!screenshotResultWindow || screenshotResultWindow.isDestroyed() || !lastScreenshotResultPayload) return;
+      screenshotResultWindow.webContents.send('screenshot-result-data', lastScreenshotResultPayload);
+    });
+  } else {
+    screenshotResultWindow.setBounds({ x: nextX, y: nextY, width, height });
+    screenshotResultWindow.webContents.send('screenshot-result-data', lastScreenshotResultPayload);
+  }
+
+  screenshotResultWindow.show();
+  screenshotResultWindow.focus();
+}
 
 function getFloatingWindowBounds() {
   if (!floatingWindow || floatingWindow.isDestroyed()) return null;
@@ -2977,6 +3398,73 @@ function setupIpc() {
       return filePath && fs.existsSync(filePath) ? pathToFileURL(filePath).href : '';
     })()
   }));
+
+  ipcMain.handle('open-screenshot-translate', async () => {
+    try {
+      openScreenshotSelectionWindow();
+      return { ok: true };
+    } catch (error) {
+      const message = error && error.message ? error.message : '无法打开截图窗口';
+      return { ok: false, message };
+    }
+  });
+
+  ipcMain.handle('screenshot-selection-complete', async (_, payload = {}) => {
+    closeScreenshotSelectionWindow();
+    try {
+      const selection = {
+        x: Math.round(Number(payload.x) || 0),
+        y: Math.round(Number(payload.y) || 0),
+        width: Math.max(1, Math.round(Number(payload.width) || 1)),
+        height: Math.max(1, Math.round(Number(payload.height) || 1))
+      };
+      const imageDataUrl = await captureScreenRegion(selection);
+      let ocrText = '';
+      try {
+        ocrText = await runOcrWithPublicApi(imageDataUrl);
+      } catch {
+        ocrText = '';
+      }
+      showScreenshotResultWindow(selection, imageDataUrl, ocrText);
+      return { ok: true };
+    } catch (error) {
+      const message = error && error.message ? error.message : '截图失败';
+      sendSnapshot(message);
+      return { ok: false, message };
+    }
+  });
+
+  ipcMain.handle('screenshot-selection-cancel', async () => {
+    closeScreenshotSelectionWindow();
+    return { ok: true };
+  });
+
+  ipcMain.handle('screenshot-translate', async (_, payload = {}) => {
+    try {
+      const text = String(payload.text || '').trim();
+      const targetLang = String(payload.targetLang || 'zh-CN').trim() || 'zh-CN';
+      const translatedText = await translateTextWithPublicApi(text, targetLang);
+      return { ok: true, translatedText };
+    } catch (error) {
+      const configPath = getApiConfigPath();
+      const detail = error && error.message ? error.message : '翻译失败';
+      return {
+        ok: false,
+        message: `${detail}\n可在 ${configPath} 自定义翻译 API`
+      };
+    }
+  });
+
+  ipcMain.handle('screenshot-copy-text', async (_, text = '') => {
+    const value = String(text || '');
+    clipboard.writeText(value);
+    return { ok: true };
+  });
+
+  ipcMain.handle('screenshot-result-close', async () => {
+    closeScreenshotResultWindow();
+    return { ok: true };
+  });
 
   ipcMain.handle('floating-quick-save', async () => quickCaptureClipboard({ category: 'daily' }));
 

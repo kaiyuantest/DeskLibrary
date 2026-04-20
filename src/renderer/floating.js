@@ -8,6 +8,7 @@ const startAccumulationBtn = document.getElementById('startAccumulationBtn');
 const finishAccumulationBtn = document.getElementById('finishAccumulationBtn');
 const undoAccumulationBtn = document.getElementById('undoAccumulationBtn');
 const cancelAccumulationBtn = document.getElementById('cancelAccumulationBtn');
+const screenshotTranslateBtn = document.getElementById('screenshotTranslateBtn');
 const hideFloatingBtn = document.getElementById('hideFloatingBtn');
 
 let menuOpen = false;
@@ -91,6 +92,11 @@ undoAccumulationBtn.addEventListener('click', async () => {
 
 cancelAccumulationBtn.addEventListener('click', async () => {
   await window.deskLibraryFloating.cancelAccumulation();
+  await window.deskLibraryFloating.closeMenu();
+});
+
+screenshotTranslateBtn.addEventListener('click', async () => {
+  await window.deskLibraryFloating.startScreenshotTranslate();
   await window.deskLibraryFloating.closeMenu();
 });
 

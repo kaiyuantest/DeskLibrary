@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('deskLibraryFloating', {
   finishAccumulation: () => ipcRenderer.invoke('finish-accumulation'),
   cancelAccumulation: () => ipcRenderer.invoke('cancel-accumulation'),
   deleteLastCapture: () => ipcRenderer.invoke('delete-last-capture'),
+  startScreenshotTranslate: () => ipcRenderer.invoke('open-screenshot-translate'),
   disableFloatingIcon: () => ipcRenderer.invoke('disable-floating-icon'),
   setHovered: (hovered) => ipcRenderer.invoke('floating-set-hovered', hovered),
   startDrag: (payload) => ipcRenderer.invoke('floating-drag-start', payload),

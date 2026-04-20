@@ -1427,6 +1427,12 @@ input[type="checkbox"]:checked::before {
   max-width: none;
 }
 
+.setting-path-input-group select {
+  flex: 1;
+  min-width: 0;
+  max-width: none;
+}
+
 .setting-path-input-group .text-action {
   flex-shrink: 0;
   padding: 8px 14px;

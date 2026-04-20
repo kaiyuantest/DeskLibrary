@@ -192,6 +192,12 @@ const els = {
   selectSelfBuiltWorkspaceDirBtn: document.getElementById('selectSelfBuiltWorkspaceDirBtn'),
   assetBackupPathInput: document.getElementById('assetBackupPathInput'),
   selectAssetBackupPathBtn: document.getElementById('selectAssetBackupPathBtn'),
+  screenshotTranslateProviderSelect: document.getElementById('screenshotTranslateProviderSelect'),
+  screenshotTranslateCustomUrlInput: document.getElementById('screenshotTranslateCustomUrlInput'),
+  screenshotTranslateCustomMethodInput: document.getElementById('screenshotTranslateCustomMethodInput'),
+  screenshotTranslateCustomHeadersInput: document.getElementById('screenshotTranslateCustomHeadersInput'),
+  screenshotOcrApiKeyInput: document.getElementById('screenshotOcrApiKeyInput'),
+  screenshotOcrLangInput: document.getElementById('screenshotOcrLangInput'),
   resetSettingsBtn: document.getElementById('resetSettingsBtn'),
   saveSettingsBtn: document.getElementById('saveSettingsBtn'),
   settingsHelpModal: document.getElementById('settingsHelpModal'),
@@ -1681,6 +1687,21 @@ const SETTINGS_HELP = {
     title: '撤销上一段',
     subline: '仅在累计会话中',
     body: '在累计复制过程中，移除最后追加的一段文本。中间留空则不会注册全局热键，请用悬浮球菜单；填写快捷键并打开右侧开关后可全局触发。'
+  },
+  translateApi: {
+    title: '翻译模式',
+    subline: '默认公共 API + 自动回退',
+    body: '默认模式会先尝试公共翻译接口，并在失败时自动回退，且会把长文本按段翻译，避免单次请求过长导致失败。切到“仅使用自定义 API”后，只调用你填写的自定义 URL。'
+  },
+  translateCustomUrl: {
+    title: '自定义翻译 URL',
+    subline: '可选，支持自建翻译服务',
+    body: '若填写自定义 URL，默认模式会优先尝试它，失败后再回退公共接口。请求体默认是 { text, source:\"auto\", target:\"zh-CN\" }，返回可包含 translatedText / translation / data.translatedText 任一字段。'
+  },
+  ocrApi: {
+    title: 'OCR API Key',
+    subline: '截图识别文本使用',
+    body: '留空时使用公共 demo key（可能限频）。建议填写你自己的 OCR.space Key，避免识别失败或额度不足。OCR 语言默认 eng，可改成 chi_sim 等。'
   }
 };
 
@@ -1913,6 +1934,26 @@ function renderSettings() {
   }
   if (els.assetBackupPathInput) {
     els.assetBackupPathInput.value = normalizeWindowsPathDisplay(s.assetBackupPath || '');
+  }
+  if (els.screenshotTranslateProviderSelect) {
+    els.screenshotTranslateProviderSelect.value = String(s.screenshotTranslateProvider || 'auto').toLowerCase() === 'custom'
+      ? 'custom'
+      : 'auto';
+  }
+  if (els.screenshotTranslateCustomUrlInput) {
+    els.screenshotTranslateCustomUrlInput.value = String(s.screenshotTranslateCustomUrl || '').trim();
+  }
+  if (els.screenshotTranslateCustomMethodInput) {
+    els.screenshotTranslateCustomMethodInput.value = String(s.screenshotTranslateCustomMethod || 'POST').trim().toUpperCase();
+  }
+  if (els.screenshotTranslateCustomHeadersInput) {
+    els.screenshotTranslateCustomHeadersInput.value = String(s.screenshotTranslateCustomHeaders || '').trim();
+  }
+  if (els.screenshotOcrApiKeyInput) {
+    els.screenshotOcrApiKeyInput.value = String(s.screenshotOcrApiKey || '').trim();
+  }
+  if (els.screenshotOcrLangInput) {
+    els.screenshotOcrLangInput.value = String(s.screenshotOcrLang || 'eng').trim();
   }
 }
 
@@ -2214,7 +2255,13 @@ function collectSettings() {
     selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
     selfBuiltChromePath: selfBuiltWorkspaceDir ? `${selfBuiltWorkspaceDir}\\chrome.exe` : '',
     selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? `${selfBuiltWorkspaceDir}\\chromedriver.exe` : '',
-    assetBackupPath
+    assetBackupPath,
+    screenshotTranslateProvider: String(els.screenshotTranslateProviderSelect?.value || 'auto').trim().toLowerCase(),
+    screenshotTranslateCustomUrl: String(els.screenshotTranslateCustomUrlInput?.value || '').trim(),
+    screenshotTranslateCustomMethod: String(els.screenshotTranslateCustomMethodInput?.value || 'POST').trim().toUpperCase(),
+    screenshotTranslateCustomHeaders: String(els.screenshotTranslateCustomHeadersInput?.value || '').trim(),
+    screenshotOcrApiKey: String(els.screenshotOcrApiKeyInput?.value || '').trim(),
+    screenshotOcrLang: String(els.screenshotOcrLangInput?.value || 'eng').trim()
   };
 }
 
@@ -2940,6 +2987,19 @@ els.deleteRecordBtn.addEventListener('click', async () => {
 
 els.saveSettingsBtn.addEventListener('click', async () => {
   const nextSettings = collectSettings();
+  const headersRaw = String(nextSettings.screenshotTranslateCustomHeaders || '').trim();
+  if (headersRaw) {
+    try {
+      const parsed = JSON.parse(headersRaw);
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        alert('自定义翻译 Headers 必须是 JSON 对象，例如 {"Authorization":"Bearer xxx"}');
+        return;
+      }
+    } catch {
+      alert('自定义翻译 Headers 不是有效 JSON，请检查格式');
+      return;
+    }
+  }
   const result = await window.deskLibrary.saveSettings(nextSettings);
   if (result && result.ok === false) {
     alert(result.message || '保存设置失败');
