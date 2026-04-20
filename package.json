@@ -1,0 +1,55 @@
+{
+  "name": "desklibrary-electron",
+  "version": "1.0.0",
+  "description": "DeskLibrary — 桌面收藏工作台，让碎片信息集中管理",
+  "main": "src/main/index.js",
+  "author": "DeskLibrary Team",
+  "license": "GPL-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kaiyuantest/DeskLibrary.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kaiyuantest/DeskLibrary/issues"
+  },
+  "homepage": "https://github.com/kaiyuantest/DeskLibrary#readme",
+  "keywords": [
+    "electron",
+    "desktop",
+    "clipboard",
+    "collection",
+    "resource-manager",
+    "browser-cookie",
+    "windows"
+  ],
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.desklibrary.desktop",
+    "productName": "DeskLibrary",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "src/img/icon.ico"
+    }
+  },
+  "dependencies": {
+    "uiohook-napi": "^1.5.4"
+  },
+  "devDependencies": {
+    "electron": "^31.0.2",
+    "electron-builder": "^24.13.3"
+  }
+}

@@ -1,0 +1,755 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeskLibrary</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="window-shell">
+      <header class="window-titlebar">
+        <div class="window-brand">
+          <div class="brand-mark" title="DeskLibrary">D</div>
+          <div class="window-brand-text">
+            <strong>DeskLibrary</strong>
+            <span>桌面收藏工作台</span>
+          </div>
+        </div>
+        <div class="window-drag-space"></div>
+        <div class="window-controls">
+          <button id="windowMinBtn" class="window-control-btn" title="最小化">─</button>
+          <button id="windowMaxBtn" class="window-control-btn" title="最大化">□</button>
+          <button id="windowCloseBtn" class="window-control-btn danger" title="关闭">×</button>
+        </div>
+      </header>
+
+      <div class="app-shell">
+        <aside class="sidebar">
+          <div class="sidebar-brand">
+            <div class="sidebar-badge">Workboard</div>
+            <div class="sidebar-copy">
+              <h2>捕捉有价值的片段</h2>
+              <p>把每日临时信息变成可搜索、可回收、可沉淀的资料库。</p>
+            </div>
+          </div>
+
+          <nav class="nav-rail">
+            <button id="dailyPageBtn" class="rail-btn active" title="每日内容">
+              <span class="rail-icon">☰</span>
+              <span class="rail-label">每日内容</span>
+            </button>
+            <button id="commonPageBtn" class="rail-btn" title="常用">
+              <span class="rail-icon">★</span>
+              <span class="rail-label">常用</span>
+            </button>
+            <button id="assetsPageBtn" class="rail-btn" title="资源库">
+              <span class="rail-icon">⬒</span>
+              <span class="rail-label">资源库</span>
+            </button>
+            <button id="browserCardsPageBtn" class="rail-btn" title="浏览器卡片">
+              <span class="rail-icon">◫</span>
+              <span class="rail-label">浏览器卡片</span>
+            </button>
+            <button id="settingsPageBtn" class="rail-btn" title="设置">
+              <span class="rail-icon">⚙</span>
+              <span class="rail-label">偏好设置</span>
+            </button>
+            <button id="aboutPageBtn" class="rail-btn" title="关于与反馈">
+              <span class="rail-icon">ℹ</span>
+              <span class="rail-label">关于</span>
+            </button>
+          </nav>
+
+          <div class="sidebar-bottom">
+            <button id="refreshBtn" class="rail-btn ghost" title="刷新">
+              <span class="rail-icon">↻</span>
+              <span class="rail-label">刷新快照</span>
+            </button>
+            <button id="mobileDateToggleBtn" class="mobile-tool-btn rail-btn ghost" title="日期筛选">
+              <span class="rail-icon">📅</span>
+              <span class="rail-label">日期筛选</span>
+            </button>
+            <button id="mobileFilterToggleBtn" class="mobile-tool-btn rail-btn ghost" title="日期标签">
+              <span class="rail-icon">🏷</span>
+              <span class="rail-label">日期标签</span>
+            </button>
+          </div>
+        </aside>
+
+        <main class="main-shell">
+          <header class="topbar">
+            <nav class="mobile-nav-bar">
+              <button id="mobileDailyNavBtn" class="mobile-nav-btn active" type="button">每日</button>
+              <button id="mobileCommonNavBtn" class="mobile-nav-btn" type="button">常用</button>
+              <button id="mobileAssetsNavBtn" class="mobile-nav-btn" type="button">资源</button>
+              <button id="mobileBrowserCardsNavBtn" class="mobile-nav-btn" type="button">浏览</button>
+              <button id="mobileSettingsNavBtn" class="mobile-nav-btn" type="button">设置</button>
+              <button id="mobileAboutNavBtn" class="mobile-nav-btn" type="button">关于</button>
+            </nav>
+
+            <div class="topbar-copy">
+              <div class="eyebrow">Content Console</div>
+              <h1 id="pageTitle">每日内容</h1>
+              <p id="statusText">后台监听中</p>
+            </div>
+
+            <section id="topbarControlDeck" class="control-deck">
+              <label class="control-card search-card">
+                <div class="search-card-head">
+                  <span class="control-label">快速搜索</span>
+                  <div class="search-tools">
+                    <button id="imageOnlyToggle" class="search-icon-btn" type="button" title="仅看图片">图片</button>
+                    <select id="sourceFilterSelect" class="source-filter-select" title="按来源筛选">
+                      <option value="全部来源">全部来源</option>
+                    </select>
+                  </div>
+                </div>
+                <input id="dailySearchInput" class="search-input" type="text" placeholder="搜索内容 / 备注 / 标题" />
+              </label>
+
+              <label class="control-card date-card mobile-collapsible">
+                <span class="control-label">日期筛选</span>
+                <input id="dailyDatePicker" class="date-input" type="date" />
+              </label>
+
+              <section class="control-card filter-card mobile-collapsible">
+                <div class="control-label">日期标签</div>
+                <div id="dailyFilterBar" class="filter-bar"></div>
+              </section>
+            </section>
+          </header>
+
+          <div class="page-stack">
+            <section id="dailyPage" class="page-view page-scroll">
+              <section class="composer-inline">
+                <textarea id="newRecordDraft" rows="2" placeholder="快速记一条备忘、命令或片段..." spellcheck="false"></textarea>
+                <button id="createRecordBtn" class="icon-action primary" title="新增">＋</button>
+              </section>
+
+              <section class="section-head compact">
+                <span>每日内容</span>
+                <span id="dailyCount" class="count-chip">0</span>
+              </section>
+              <section id="recordsList" class="cards-grid"></section>
+              <div id="dailyPagination" class="pagination-bar"></div>
+            </section>
+
+            <section id="commonPage" class="page-view page-scroll hidden">
+              <section class="panel minimalist-panel">
+                <div class="section-head">
+                  <span>常用</span>
+                  <span id="commonCount" class="count-chip">0</span>
+                </div>
+                <section id="commonRecordsList" class="cards-grid compact-grid"></section>
+              </section>
+            </section>
+
+            <section id="assetsPage" class="page-view page-scroll hidden">
+              <section class="assets-hero-section">
+                <div class="assets-hero-header">
+                  <div class="assets-hero-left">
+                    <div class="eyebrow asset-eyebrow">Asset Vault</div>
+                    <div class="section-head asset-head">
+                      <span id="assetsPageHeading">资源库</span>
+                      <span id="assetsCount" class="count-chip">0</span>
+                    </div>
+                    <p class="asset-hero-text">统一管理备份文件和快捷入口，长期保存或快速访问。</p>
+                  </div>
+                  <div class="assets-hero-right">
+                    <label class="assets-search-box">
+                      <span class="assets-search-icon">🔍</span>
+                      <input id="assetSearchInput" class="assets-search-input" type="text" placeholder="搜索文件名、路径或备注..." />
+                    </label>
+                  </div>
+                </div>
+
+                <div class="assets-filter-row">
+                  <div class="assets-filter-label">资源类型</div>
+                  <div id="assetTypeFilterBar" class="assets-filter-chips"></div>
+                </div>
+
+                <div class="assets-dropzone-grid">
+                  <div id="assetBackupDropZone" class="assets-dropzone assets-dropzone-backup" data-mode="backup" tabindex="0">
+                    <div class="assets-dropzone-icon">📦</div>
+                    <div class="assets-dropzone-content">
+                      <strong>备份存储</strong>
+                      <span>拖入文件或文件夹，复制到软件目录永久保存</span>
+                    </div>
+                  </div>
+                  <div id="assetLinkDropZone" class="assets-dropzone assets-dropzone-link" data-mode="link" tabindex="0">
+                    <div class="assets-dropzone-icon">🔗</div>
+                    <div class="assets-dropzone-content">
+                      <strong>快捷存储</strong>
+                      <span>拖入文件或文件夹，仅保存路径快速访问</span>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <section id="assetsList" class="assets-card-grid"></section>
+            </section>
+
+            <section id="browserCardsPage" class="page-view page-scroll hidden">
+              <section class="browser-cards-hero">
+                <div class="browser-cards-hero-left">
+                  <div class="section-head browser-cards-main-head">
+                    <span>浏览器 Cookie 卡片</span>
+                    <span id="browserCardCount" class="count-chip">0</span>
+                  </div>
+                  <p class="browser-cards-desc">管理和导入浏览器 Cookie，实现多账号快速切换和登录状态保存。</p>
+                </div>
+                <div class="browser-cards-hero-right">
+                  <button id="openBrowserImportModalBtn" class="browser-import-hero-btn" type="button">
+                    <span class="browser-import-hero-icon">⊕</span>
+                    <div class="browser-import-hero-text">
+                      <strong>离线导入</strong>
+                      <span>从本地浏览器导入 Cookie</span>
+                    </div>
+                  </button>
+                </div>
+              </section>
+
+              <label class="control-card search-card browser-card-search-inline">
+                <span class="control-label">搜索卡片</span>
+                <input id="browserCardSearchInput" class="search-input" type="text" placeholder="搜索域名 / 备注 / 来源" />
+              </label>
+
+              <section class="browser-card-bulkbar">
+                <div class="browser-card-bulkbar-info">
+                  <span>已选中</span>
+                  <strong id="browserCardSelectedCount">0</strong>
+                </div>
+                <div class="browser-card-bulkbar-actions">
+                  <button id="browserCardSelectAllBtn" class="text-action" type="button">全选</button>
+                  <button id="browserCardClearSelectionBtn" class="text-action" type="button">清空</button>
+                  <button id="browserCardExpandAllBtn" class="text-action" type="button">全部展开</button>
+                  <button id="browserCardCollapseAllBtn" class="text-action" type="button">全部收起</button>
+                  <button id="browserCardBatchTestBtn" class="text-action" type="button">批量测试</button>
+                  <button id="browserCardBatchDeleteBtn" class="text-action danger" type="button">批量删除</button>
+                </div>
+              </section>
+
+              <section id="browserCardsList" class="cards-grid"></section>
+            </section>
+
+            <section id="settingsPage" class="page-view page-scroll hidden">
+              <section class="panel minimalist-panel settings-panel">
+                <div class="section-head settings-head">
+                  <span>行为设置</span>
+                  <span class="count-chip">系统级</span>
+                </div>
+
+                <div class="settings-list">
+                  <div class="setting-row setting-row-rich">
+                    <div class="setting-row-main">
+                      <span class="setting-label-text">复制后智能判断（文本）</span>
+                      <button type="button" class="setting-help-btn" data-help-key="autoJudgment" title="查看说明">?</button>
+                      <span class="setting-shortcut-readonly">默认不打开</span>
+                    </div>
+                    <label class="setting-checkbox-wrap"><input id="autoJudgmentEnabled" type="checkbox" /></label>
+                  </div>
+                  <div class="setting-row setting-row-rich">
+                    <div class="setting-row-main">
+                      <span class="setting-label-text">观察窗口内连按两次复制</span>
+                      <button type="button" class="setting-help-btn" data-help-key="doubleCopy" title="查看说明">!</button>
+                      <span class="setting-shortcut-readonly">连按两次系统复制</span>
+                    </div>
+                    <label class="setting-checkbox-wrap"><input id="doubleCopyEnabled" type="checkbox" /></label>
+                  </div>
+                  <div class="setting-row setting-row-rich">
+                    <div class="setting-row-main">
+                      <span class="setting-label-text">复制后再按快捷键收藏</span>
+                      <button type="button" class="setting-help-btn" data-help-key="copyThenKey" title="查看说明">!</button>
+                      <input id="postCopyKey" class="setting-shortcut-input" type="text" spellcheck="false" autocomplete="off" placeholder="例如 K / Ctrl+K / Shift+Alt+S" title="复制完成后在观察窗口内按下的单键或组合键" />
+                      <button type="button" class="shortcut-capture-btn" data-shortcut-target="postCopyKey" data-shortcut-mode="postcopy" title="录制快捷键">⌨</button>
+                    </div>
+                    <label class="setting-checkbox-wrap"><input id="copyThenKeyEnabled" type="checkbox" /></label>
+                  </div>
+                  <div class="setting-row setting-row-rich">
+                    <div class="setting-row-main">
+                      <span class="setting-label-text">删除上次收藏</span>
+                      <button type="button" class="setting-help-btn" data-help-key="deleteLastCapture" title="查看说明">!</button>
+                      <input id="deleteLastCaptureShortcutInput" class="setting-shortcut-input" type="text" spellcheck="false" autocomplete="off" placeholder="Ctrl+Alt+Z" />
+                      <button type="button" class="shortcut-capture-btn" data-shortcut-target="deleteLastCaptureShortcutInput" title="录制快捷键">⌨</button>
+                    </div>
+                    <label class="setting-checkbox-wrap"><input id="hotkeyDeleteLastEnabled" type="checkbox" /></label>
+                  </div>
+                  <div class="setting-row setting-row-rich">
+                    <div class="setting-row-main">
+                      <span class="setting-label-text">开始累计</span>
+                      <button type="button" class="setting-help-btn" data-help-key="startAccumulation" title="查看说明">!</button>
+                      <input id="accumulationStartShortcutInput" class="setting-shortcut-input" type="text" spellcheck="false" autocomplete="off" placeholder="Ctrl+Alt+A" />
+                      <button type="button" class="shortcut-capture-btn" data-shortcut-target="accumulationStartShortcutInput" title="录制快捷键">⌨</button>
+                    </div>
+                    <label class="setting-checkbox-wrap"><input id="hotkeyStartAccumEnabled" type="checkbox" /></label>
+                  </div>
+                  <div class="setting-row setting-row-rich">
+                    <div class="setting-row-main">
+                      <span class="setting-label-text">结束累计</span>
+                      <button type="button" class="setting-help-btn" data-help-key="finishAccumulation" title="查看说明">!</button>
+                      <input id="accumulationFinishShortcutInput" class="setting-shortcut-input" type="text" spellcheck="false" autocomplete="off" placeholder="Ctrl+Alt+S" />
+                      <button type="button" class="shortcut-capture-btn" data-shortcut-target="accumulationFinishShortcutInput" title="录制快捷键">⌨</button>
+                    </div>
+                    <label class="setting-checkbox-wrap"><input id="hotkeyFinishAccumEnabled" type="checkbox" /></label>
+                  </div>
+                  <div class="setting-row setting-row-rich">
+                    <div class="setting-row-main">
+                      <span class="setting-label-text">撤销上一段</span>
+                      <button type="button" class="setting-help-btn" data-help-key="undoAccumulation" title="查看说明">!</button>
+                      <input id="accumulationUndoShortcutInput" class="setting-shortcut-input" type="text" spellcheck="false" autocomplete="off" placeholder="留空则仅悬浮菜单" />
+                      <button type="button" class="shortcut-capture-btn" data-shortcut-target="accumulationUndoShortcutInput" title="录制快捷键">⌨</button>
+                    </div>
+                    <label class="setting-checkbox-wrap"><input id="hotkeyUndoAccumEnabled" type="checkbox" /></label>
+                  </div>
+                  <label class="setting-row"><span>开机启动</span><input id="startupLaunchEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>悬浮图标</span><input id="floatingIconEnabled" type="checkbox" /></label>
+                  <label class="setting-row"><span>靠边显示</span><input id="dockToEdgeEnabled" type="checkbox" /></label>
+                </div>
+
+                <div class="settings-subhead">路径配置</div>
+                
+                <div class="settings-key-row">
+                  <span>自建浏览器工作目录</span>
+                  <div class="setting-path-input-group">
+                    <input id="selfBuiltWorkspaceDirInput" type="text" placeholder="例如 E:\zjllq\data" />
+                    <button id="selectSelfBuiltWorkspaceDirBtn" class="text-action compact" type="button">选择</button>
+                  </div>
+                </div>
+
+                <div class="settings-key-row">
+                  <span>资源备份存储路径</span>
+                  <div class="setting-path-input-group">
+                    <input id="assetBackupPathInput" type="text" placeholder="留空则使用默认路径（软件目录下的 data/assets-backups 文件夹）" />
+                    <button id="selectAssetBackupPathBtn" class="text-action compact" type="button">选择</button>
+                  </div>
+                </div>
+
+                <p class="settings-hint">保存后重新注册全局快捷键；若与系统或其它软件冲突可能无法注册。开机启动通常需下次登录系统后验证。备份路径修改后，新导入的资源将保存到新路径。</p>
+                <div class="settings-actions">
+                  <button id="resetSettingsBtn" class="text-action danger" type="button">还原设置</button>
+                  <button id="saveSettingsBtn" class="save-pill" type="button">保存设置</button>
+                </div>
+              </section>
+            </section>
+
+            <section id="aboutPage" class="page-view page-scroll hidden">
+              <section class="panel minimalist-panel about-panel">
+                <div class="section-head about-head">
+                  <span>关于 DeskLibrary</span>
+                  <span class="count-chip subtle">桌面收藏工作台</span>
+                </div>
+                <p class="about-lead">
+                  DeskLibrary 是一款 Windows 桌面端工作台应用：剪贴板与快捷键捕捉文本/图片、资源库备份或快捷入口、浏览器 Cookie 卡片与远程调试导入等，帮助把碎片信息集中在一处检索与复用。
+                </p>
+
+                <div class="about-subhead">开源</div>
+                <p class="about-line">
+                  源码托管于 GitHub，欢迎查阅与提交 Issue。
+                  <button type="button" class="text-action inline-link" id="aboutOpenSourceBtn">打开仓库</button>
+                </p>
+                <div class="about-code-block" id="aboutRepoUrl">https://github.com/yourusername/DeskLibrary</div>
+
+                <div class="about-subhead">联系与赞赏</div>
+                <div class="about-qr-grid">
+                  <figure class="about-qr-card">
+                    <img src="../img/微信二维码.jpg" alt="微信二维码" class="about-qr-img" />
+                    <figcaption>微信</figcaption>
+                  </figure>
+                  <figure class="about-qr-card">
+                    <img src="../img/赞赏码.jpg" alt="赞赏码" class="about-qr-img" />
+                    <figcaption>赞赏支持</figcaption>
+                  </figure>
+                </div>
+
+                <div class="about-subhead">反馈与开发建议</div>
+                <p class="about-hint">提交后将通过邮件发送给开发者（请勿在公共网络下提交敏感密码）。</p>
+                <form id="aboutFeedbackForm" class="about-feedback-form">
+                  <label class="about-field">
+                    <span class="control-label">称呼 / 标题</span>
+                    <input id="aboutFeedbackTitle" type="text" name="title" maxlength="120" placeholder="选填，便于区分来信" />
+                  </label>
+                  <label class="about-field">
+                    <span class="control-label">联系方式</span>
+                    <input id="aboutFeedbackContact" type="text" name="contact" maxlength="200" placeholder="邮箱 / 微信等，选填" />
+                  </label>
+                  <label class="about-field">
+                    <span class="control-label">反馈内容 <span class="required">*</span></span>
+                    <textarea id="aboutFeedbackMessage" name="message" rows="6" maxlength="8000" placeholder="功能建议、Bug 描述、使用场景等" required spellcheck="false"></textarea>
+                  </label>
+                  <input type="hidden" name="source" id="aboutFeedbackSource" value="DeskLibrary 桌面版" />
+                  <div class="about-feedback-actions">
+                    <button type="submit" class="save-pill" id="aboutFeedbackSubmitBtn">发送反馈</button>
+                    <span id="aboutFeedbackStatus" class="about-feedback-status" role="status"></span>
+                  </div>
+                </form>
+              </section>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <div id="settingsHelpModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="settingsHelpTitle">
+      <div id="settingsHelpModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card settings-help-card">
+        <div class="modal-head">
+          <div>
+            <div id="settingsHelpTitle" class="modal-title">说明</div>
+            <div id="settingsHelpSubline" class="modal-subline"></div>
+          </div>
+          <button id="closeSettingsHelpModalBtn" type="button" class="icon-action" title="关闭">×</button>
+        </div>
+        <div id="settingsHelpBody" class="settings-help-body"></div>
+      </section>
+    </div>
+    <div id="shortcutCaptureModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="shortcutCaptureTitle">
+      <div id="shortcutCaptureModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card shortcut-capture-modal-card">
+        <div class="modal-head">
+          <div>
+            <div id="shortcutCaptureTitle" class="modal-title">录制快捷键</div>
+            <div id="shortcutCaptureHint" class="modal-subline">请直接按下快捷键组合，按 Esc 取消</div>
+          </div>
+          <button id="closeShortcutCaptureModalBtn" type="button" class="icon-action" title="关闭">×</button>
+        </div>
+        <div class="shortcut-capture-display-wrap">
+          <div id="shortcutCaptureValue" class="shortcut-capture-display">未检测到按键</div>
+        </div>
+        <div class="modal-actions">
+          <button id="shortcutCaptureCancelBtn" class="text-action" type="button">取消</button>
+          <button id="shortcutCaptureConfirmBtn" class="save-pill compact" type="button" disabled>确认替换</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="recordModal" class="modal hidden">
+      <div id="modalOverlay" class="modal-overlay"></div>
+      <section class="modal-card">
+        <div class="modal-head">
+          <div>
+            <div id="modalTitle" class="modal-title">请选择一条记录</div>
+            <div id="modalSubline" class="modal-subline">-</div>
+          </div>
+          <button id="closeModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+
+        <div class="modal-meta">
+          <div><span class="meta-label">类型</span><span id="modalType">-</span></div>
+          <div><span class="meta-label">方式</span><span id="modalMethod">-</span></div>
+          <div><span class="meta-label">分类</span><span id="modalCategory">-</span></div>
+          <div><span class="meta-label">命中</span><span id="modalHitCount">-</span></div>
+          <div><span class="meta-label">最近</span><span id="modalLastCapturedAt">-</span></div>
+        </div>
+
+        <div class="modal-body">
+          <div id="modalImagePreviewBlock" class="image-block hidden">
+            <div class="image-frame modal-image-frame">
+              <img id="modalImage" alt="图片预览" />
+            </div>
+            <button id="openImagePathBtn" class="text-action">打开图片位置</button>
+            <div id="modalImagePath" class="minor-text break-all">-</div>
+          </div>
+
+          <textarea id="detailTextContent" rows="9" placeholder="文本内容"></textarea>
+          <textarea id="detailNote" rows="4" placeholder="备注"></textarea>
+          <div id="detailWindowTitle" class="minor-text break-all">-</div>
+        </div>
+
+        <div class="modal-actions">
+          <button id="saveContentBtn" class="text-action">保存正文</button>
+          <button id="saveNoteBtn" class="text-action">保存备注</button>
+          <button id="moveToCommonBtn" class="text-action">加入常用</button>
+          <button id="moveToDailyBtn" class="text-action">移回每日</button>
+          <button id="deleteRecordBtn" class="text-action danger">删除</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="assetModal" class="modal hidden">
+      <div id="assetModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card">
+        <div class="modal-head">
+          <div>
+            <div id="assetModalTitle" class="modal-title">请选择一个资源</div>
+            <div id="assetModalSubline" class="modal-subline">-</div>
+          </div>
+          <button id="closeAssetModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+
+        <div id="assetModalMeta" class="modal-meta"></div>
+
+        <div class="modal-body">
+          <div id="assetModalPreviewBlock" class="image-block hidden">
+            <div class="image-frame modal-image-frame">
+              <img id="assetModalImage" alt="资源预览" />
+            </div>
+          </div>
+
+          <div id="assetModalPaths" class="asset-detail-paths"></div>
+          <textarea id="assetNoteInput" rows="5" placeholder="为这个资源补充说明、用途或关键词"></textarea>
+        </div>
+
+        <div class="modal-actions">
+          <button id="assetOpenPrimaryBtn" class="text-action" type="button">打开资源</button>
+          <button id="assetOpenSourceBtn" class="text-action" type="button">打开原位置</button>
+          <button id="assetOpenLocationBtn" class="text-action" type="button">打开所在位置</button>
+          <button id="assetSaveNoteBtn" class="text-action" type="button">保存备注</button>
+          <button id="assetDeleteBtn" class="text-action danger" type="button">删除资源</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="browserCardModal" class="modal hidden">
+      <div id="browserCardModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card browser-card-modal-card">
+        <div class="modal-head">
+          <div>
+            <div id="browserCardModalTitle" class="modal-title">请选择一张浏览器卡片</div>
+            <div id="browserCardModalSubline" class="modal-subline">-</div>
+          </div>
+          <button id="closeBrowserCardModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+
+        <div id="browserCardModalMeta" class="modal-meta browser-card-modal-meta"></div>
+
+        <div class="modal-body browser-card-modal-body">
+          <label class="browser-card-form-block">
+            <span class="control-label">卡片名称</span>
+            <input id="browserCardNameInput" type="text" placeholder="卡片名称 / 标题" />
+          </label>
+          <label class="browser-card-form-block">
+            <span class="control-label">访问地址</span>
+            <input id="browserCardOpenUrlInput" type="text" placeholder="打开地址，例如 https://example.com/path" />
+          </label>
+          <div class="browser-card-form-grid">
+            <label class="browser-card-form-block">
+              <span class="control-label">账号</span>
+              <input id="browserCardUsernameInput" type="text" placeholder="账号 / 用户名" />
+            </label>
+            <label class="browser-card-form-block">
+              <span class="control-label">密码</span>
+              <input id="browserCardPasswordInput" type="text" placeholder="密码，本地保存" />
+            </label>
+          </div>
+          <label class="browser-card-form-block">
+            <span class="control-label">备注</span>
+            <textarea id="browserCardRemarkInput" rows="3" placeholder="备注：用途、站点提示、来源说明"></textarea>
+          </label>
+        </div>
+
+        <div class="modal-actions">
+          <button id="browserCardOpenBtn" class="text-action" type="button" title="浏览器已运行时仅导航，不覆盖当前登录">一键打开</button>
+          <button id="browserCardInjectBtn" class="text-action" type="button">Cookie 转移</button>
+          <button id="browserCardOpenSourceBtn" class="text-action" type="button">打开来源目录</button>
+          <button id="browserCardSaveBtn" class="text-action" type="button">保存修改</button>
+          <button id="browserCardDeleteBtn" class="text-action danger" type="button">删除卡片</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="browserInjectModal" class="modal hidden">
+      <div id="browserInjectModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card browser-inject-modal-card">
+        <div class="modal-head">
+          <div>
+            <div class="modal-title">Cookie 转移</div>
+            <div id="browserInjectStatus" class="modal-subline">请选择目标浏览器</div>
+          </div>
+          <button id="closeBrowserInjectModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+
+        <div class="browser-inject-actions">
+          <button id="browserInjectRefreshBtn" class="text-action" type="button">刷新目标浏览器</button>
+        </div>
+
+        <div class="modal-body browser-inject-modal-body">
+          <section class="browser-inject-panel">
+            <div class="section-head compact">
+              <span>目标浏览器</span>
+              <span id="browserInjectTargetCount" class="count-chip">0</span>
+            </div>
+            <section id="browserInjectTargetsList" class="browser-inject-targets-list"></section>
+          </section>
+
+          <section class="browser-inject-panel">
+            <div class="section-head compact">
+              <span>转移方式</span>
+            </div>
+            <label class="browser-inject-method-row">
+              <input id="browserInjectMethodInject" name="browserInjectMethod" type="radio" value="inject" checked />
+              <div>
+                <strong>CDP 注入</strong>
+                <span>目标浏览器正在运行时立即注入并导航，适合自建浏览器和比特浏览器。</span>
+              </div>
+            </label>
+            <label class="browser-inject-method-row">
+              <input id="browserInjectMethodDbWrite" name="browserInjectMethod" type="radio" value="db_write" />
+              <div>
+                <strong>数据库写入</strong>
+                <span>直写目标 Cookie 数据库，通常需要目标浏览器关闭后再使用。</span>
+              </div>
+            </label>
+            <div id="browserInjectHint" class="minor-text">系统 Chrome 目标会固定走数据库写入。</div>
+          </section>
+        </div>
+
+        <div class="modal-actions">
+          <button id="browserInjectConfirmBtn" class="save-pill compact" type="button">开始转移</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="browserOnlineImportModal" class="modal hidden">
+      <div id="browserOnlineImportModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card browser-inject-modal-card">
+        <div class="modal-head">
+          <div>
+            <div class="modal-title">在线导入 Cookie</div>
+            <div id="browserOnlineImportStatus" class="modal-subline">请选择目标并填写账号名称</div>
+          </div>
+          <button id="closeBrowserOnlineImportModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+        <div class="browser-inject-actions">
+          <button id="browserOnlineImportRefreshBtn" class="text-action" type="button">刷新目标列表</button>
+        </div>
+        <div class="modal-body browser-inject-modal-body browser-online-import-modal-body">
+          <section class="browser-inject-panel">
+            <div class="section-head compact">
+              <span>目标浏览器</span>
+            </div>
+            <label class="control-card asset-search-card browser-import-config-card browser-online-import-field">
+              <span class="control-label">选择实例</span>
+              <select id="browserOnlineImportTargetSelect" class="search-input"></select>
+            </label>
+            <label class="control-card asset-search-card browser-import-config-card browser-online-import-field">
+              <span class="control-label">账号名称（写入卡片名称）</span>
+              <input id="browserOnlineImportAccountInput" class="search-input" type="text" placeholder="例如：工作号主账号" />
+            </label>
+            <p class="minor-text browser-online-import-hint">
+              目标须已开启远程调试（自建环境需带 <code>--remote-debugging-port</code>）。应用会扫描本机约 9000–10000 端口的调试服务；浏览器保持打开时通过 CDP 读取，无需复制本地 Cookie 库。比特浏览器仍依赖本地 API 配置。从某分组进入时，新卡片会归入该分组（与 CDP 读取用的调试端口无关）。
+            </p>
+          </section>
+        </div>
+        <div class="modal-actions">
+          <button id="browserOnlineImportSubmitBtn" class="save-pill compact" type="button">立即提取并导入</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="browserImportModal" class="modal hidden">
+      <div id="browserImportModalOverlay" class="modal-overlay"></div>
+      <section class="modal-card browser-import-modal-card">
+        <div class="modal-head browser-import-modal-head">
+          <div class="browser-import-modal-title-wrap">
+            <div class="browser-import-modal-icon">⊕</div>
+            <div>
+              <div class="modal-title">离线导入 Cookie</div>
+              <div id="browserImportStatus" class="modal-subline">选择浏览器来源，扫描并导入 Cookie 卡片</div>
+            </div>
+          </div>
+          <button id="closeBrowserImportModalBtn" class="icon-action" title="关闭">×</button>
+        </div>
+
+        <div class="browser-import-tabs">
+          <button id="browserImportChromeTabBtn" class="browser-import-tab active" type="button">
+            <span class="browser-import-tab-icon">🌐</span>
+            <span>系统 Chrome</span>
+          </button>
+          <button id="browserImportSelfBuiltTabBtn" class="browser-import-tab" type="button">
+            <span class="browser-import-tab-icon">🔧</span>
+            <span>自建浏览器</span>
+          </button>
+          <button id="browserImportBitTabBtn" class="browser-import-tab" type="button">
+            <span class="browser-import-tab-icon">🎯</span>
+            <span>比特浏览器</span>
+          </button>
+        </div>
+
+        <div class="modal-body">
+          <div class="browser-import-layout">
+            <section class="browser-import-config-panel">
+              <div id="browserImportSelfBuiltConfigBox" class="browser-import-config-grid hidden">
+                <label class="control-card asset-search-card browser-import-config-card">
+                  <span class="control-label">自定义端口</span>
+                  <input id="browserImportSelfBuiltPortInput" class="search-input" type="number" min="1000" max="65535" step="1" placeholder="例如 9222" />
+                </label>
+                <div class="browser-import-actions-row">
+                  <button id="browserImportOpenSelfBuiltBtn" class="text-action" type="button">打开新窗口</button>
+                </div>
+              </div>
+              <div id="browserImportBitConfigBox" class="browser-import-config-grid">
+                <label class="control-card asset-search-card browser-import-config-card">
+                  <span class="control-label">比特 API 地址</span>
+                  <input id="browserImportBitApiUrlInput" class="search-input" type="text" placeholder="http://127.0.0.1:54345" />
+                </label>
+                <label class="control-card asset-search-card browser-import-config-card">
+                  <span class="control-label">比特 API Token</span>
+                  <input id="browserImportBitApiTokenInput" class="search-input" type="text" placeholder="如未启用可留空" />
+                </label>
+              </div>
+              <div class="browser-import-actions-row">
+                <button id="browserImportSaveBitConfigBtn" class="text-action" type="button">保存比特配置</button>
+                <button id="browserImportScanSourcesBtn" class="save-pill compact" type="button">开始扫描来源</button>
+              </div>
+            </section>
+
+            <section class="browser-import-source-panel">
+              <div class="browser-import-panel-head">
+                <div class="browser-import-section-title">
+                  <span class="browser-import-step-badge">1</span>
+                  <div>
+                    <strong>选择来源</strong>
+                    <span id="browserImportSourceCount" class="browser-import-count-text">0 个来源</span>
+                  </div>
+                </div>
+                <div class="browser-import-actions-row compact">
+                  <button id="browserImportSourceSelectAllBtn" class="browser-import-mini-btn" type="button">全选</button>
+                  <button id="browserImportSourceClearBtn" class="browser-import-mini-btn" type="button">清空</button>
+                </div>
+              </div>
+              <section id="browserImportSourcesList" class="browser-import-sources-list"></section>
+            </section>
+
+            <section class="browser-import-groups-panel">
+              <div class="browser-import-panel-head">
+                <div class="browser-import-section-title">
+                  <span class="browser-import-step-badge">2</span>
+                  <div>
+                    <strong>选择域名</strong>
+                    <span id="browserImportSelectedCount" class="browser-import-count-text">0 个域名</span>
+                  </div>
+                </div>
+                <div class="browser-import-actions-row compact">
+                  <button id="browserImportLoadBtn" class="browser-import-primary-btn" type="button">加载 Cookie</button>
+                  <button id="browserImportSelectAllBtn" class="browser-import-mini-btn" type="button">全选</button>
+                  <button id="browserImportClearBtn" class="browser-import-mini-btn" type="button">清空</button>
+                </div>
+              </div>
+              <div class="browser-import-options">
+                <label class="browser-import-option-row">
+                  <input id="browserImportFilterAuth" type="checkbox" />
+                  <span>仅认证 Cookie</span>
+                </label>
+                <label class="browser-import-option-row">
+                  <input id="browserImportMergeDomain" type="checkbox" />
+                  <span>按根域名合并</span>
+                </label>
+              </div>
+              <section id="browserImportGroupsList" class="browser-import-groups-list"></section>
+              <div class="browser-import-final-actions">
+                <button id="browserImportConfirmBtn" class="browser-import-confirm-btn" type="button">
+                  <span>✓</span>
+                  <span>确认导入选中的域名</span>
+                </button>
+              </div>
+            </section>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>
