@@ -29,7 +29,7 @@ body {
   color: #ffffff;
   font: 700 16px/1 "Microsoft YaHei UI", sans-serif;
   white-space: pre-line;
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  background: linear-gradient(135deg, #2e75e8, #3f8ff1);
   background-position: center;
   background-repeat: no-repeat;
   background-size: contain;
@@ -44,6 +44,15 @@ body {
 .floating-action:focus-visible,
 .floating-action:active {
   outline: none;
+}
+
+.floating-action:hover,
+.floating-action:focus,
+.floating-action:focus-visible {
+  box-shadow: none;
+}
+
+.floating-action:active {
   box-shadow: none;
 }
 

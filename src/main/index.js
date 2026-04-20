@@ -28,8 +28,8 @@ const FLOATING_SLIDE_INTERVAL_MS = 10;
 const FLOATING_HIDE_DELAY_MS = 180;
 const FLOATING_EDGE_TRIGGER_SIZE = 18;
 const FLOATING_MENU_GAP = 0;
-const FLOATING_MENU_WIDTH = 228;
-const FLOATING_MENU_HEIGHT = 228;
+const FLOATING_MENU_WIDTH = 500;
+const FLOATING_MENU_HEIGHT = 500;
 const FLOATING_TEST_DISABLE_EXPAND = false;
 const FLOATING_TEST_DISABLE_DOCK_HIDE = false;
 const FLOATING_TEST_DISABLE_HOVER_SYNC = false;
@@ -989,7 +989,7 @@ function createFloatingWindow() {
     }
   });
 
-  floatingWindow.loadFile(path.join(__dirname, '../renderer/floating-icon.html'));
+  floatingWindow.loadFile(path.join(__dirname, '../renderer/floating-icon-v2.html'));
   floatingWindow.once('ready-to-show', () => {
     positionFloatingWindow();
     syncFloatingWindowVisibility();
@@ -1020,7 +1020,7 @@ function createFloatingMenuWindow() {
     }
   });
 
-  floatingMenuWindow.loadFile(path.join(__dirname, '../renderer/floating.html'));
+  floatingMenuWindow.loadFile(path.join(__dirname, '../renderer/floating-v2.html'));
   floatingMenuWindow.once('ready-to-show', () => {
     floatingMenuWindow.setIgnoreMouseEvents(true, { forward: true });
     floatingMenuWindow.showInactive();
@@ -1379,6 +1379,52 @@ function notify(title, body) {
   new Notification({ title, body }).show();
 }
 
+function normalizeNavigatePage(page) {
+  const raw = String(page || '').trim();
+  if (!raw) return '';
+  const map = {
+    daily: 'daily',
+    '每日': 'daily',
+    '每日内容': 'daily',
+    common: 'common',
+    '常用': 'common',
+    assets: 'assets',
+    '资源': 'assets',
+    '资源库': 'assets',
+    browserCards: 'browserCards',
+    cards: 'browserCards',
+    '卡片': 'browserCards',
+    '浏览器卡片': 'browserCards',
+    settings: 'settings',
+    '设置': 'settings',
+    '偏好设置': 'settings',
+    about: 'about',
+    '关于': 'about'
+  };
+  return map[raw] || '';
+}
+
+function navigateMainWindowPage(page) {
+  const normalized = normalizeNavigatePage(page);
+  if (!normalized || !mainWindow || mainWindow.isDestroyed() || !mainWindow.webContents || mainWindow.webContents.isDestroyed()) {
+    return false;
+  }
+  const emit = () => {
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.webContents || mainWindow.webContents.isDestroyed()) {
+      return;
+    }
+    mainWindow.webContents.send('navigate-page', { page: normalized });
+  };
+  if (mainWindow.webContents.isLoadingMainFrame()) {
+    mainWindow.webContents.once('did-finish-load', () => {
+      setTimeout(emit, 30);
+    });
+  } else {
+    setTimeout(emit, 30);
+  }
+  return true;
+}
+
 function getSettings() {
   return storage.getSettings();
 }
@@ -1420,7 +1466,24 @@ function getLastCaptureState() {
   };
 }
 
-function sendFloatingMenuState() {
+function getFloatingRecentRecords(category, limit = 4) {
+  const normalizedCategory = category === 'common' ? 'common' : 'daily';
+  const list = storage.getAllRecords()
+    .filter((item) => (item.category || 'daily') === normalizedCategory)
+    .slice(0, Math.max(1, Number(limit) || 4))
+    .map((item) => normalizeRecord(item));
+
+  return list.map((item) => ({
+    id: item.id,
+    title: item.displayTitle || '未命名记录',
+    preview: item.preview || '',
+    contentType: item.contentType || 'text',
+    sourceApp: item.sourceAppDisplay || '未知应用',
+    updatedAt: item.lastCapturedAt || item.updatedAt || item.createdAt || ''
+  }));
+}
+
+function buildFloatingMenuPayload() {
   const settings = getSettings();
   const customPath = String(settings.floatingIconCustomPath || '').trim();
   const customIconUrl = customPath && fs.existsSync(customPath)
@@ -1428,7 +1491,8 @@ function sendFloatingMenuState() {
     : '';
   const opacityRaw = Number(settings.floatingIconOpacity);
   const floatingIconOpacity = Number.isFinite(opacityRaw) ? Math.max(0.2, Math.min(1, opacityRaw)) : 1;
-  const payload = {
+
+  return {
     open: floatingMenuOpen,
     dockSide: settings.floatingDockSide === 'left' ? 'left' : 'right',
     menuSide: floatingMenuSide,
@@ -1436,8 +1500,14 @@ function sendFloatingMenuState() {
     lastCapture: getLastCaptureState(),
     floatingIconOpacity,
     floatingIconCustomPath: customPath,
-    floatingIconCustomUrl: customIconUrl
+    floatingIconCustomUrl: customIconUrl,
+    recentDailyRecords: getFloatingRecentRecords('daily', 4),
+    recentCommonRecords: getFloatingRecentRecords('common', 4)
   };
+}
+
+function sendFloatingMenuState() {
+  const payload = buildFloatingMenuPayload();
 
   const windows = [floatingWindow, floatingMenuWindow];
   windows.forEach((win) => {
@@ -2441,7 +2511,7 @@ function syncHoverStateFromCursor() {
     ? floatingMenuWindow.getBounds()
     : null;
   const insideFloatingIcon = isPointInsideBounds(cursor, floatingBounds);
-  const insideFloatingMenu = isPointInsideCircleBounds(cursor, menuBounds, 3);
+  const insideFloatingMenu = isPointInsideBounds(cursor, menuBounds);
 
   if (!FLOATING_TEST_DISABLE_HOVER_SYNC && !floatingMenuOpen && floatingWindow && !floatingWindow.isDestroyed() && settings.floatingIconEnabled) {
     const floatingDisplay = screen.getDisplayMatching(floatingBounds);
@@ -2682,6 +2752,7 @@ function setupIpc() {
   ipcMain.handle('delete-record', async (_, id) => {
     const ok = storage.deleteRecord(id);
     sendSnapshot('记录已删除');
+    sendFloatingMenuState();
     return { ok };
   });
 
@@ -2694,6 +2765,7 @@ function setupIpc() {
       }
     }
     sendSnapshot(count ? `已删除 ${count} 条记录` : '没有删除任何记录');
+    sendFloatingMenuState();
     return { ok: true, count };
   });
 
@@ -3329,12 +3401,14 @@ function setupIpc() {
   ipcMain.handle('move-record-to-common', async (_, id) => {
     const result = storage.updateRecord(id, { category: 'common' });
     sendSnapshot('已加入常用');
+    sendFloatingMenuState();
     return { ok: !!result };
   });
 
   ipcMain.handle('move-record-to-daily', async (_, id) => {
     const result = storage.updateRecord(id, { category: 'daily' });
     sendSnapshot('已移出常用');
+    sendFloatingMenuState();
     return { ok: !!result };
   });
 
@@ -3362,6 +3436,19 @@ function setupIpc() {
     closeFloatingMenu();
     showWindow();
     return { ok: true, visible: true };
+  });
+
+  ipcMain.handle('open-main-window-page', async (_, page) => {
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      return { ok: false, message: '主窗口不可用' };
+    }
+    closeFloatingMenu();
+    showWindow();
+    const ok = navigateMainWindowPage(page);
+    if (!ok) {
+      return { ok: false, message: '页面标识无效' };
+    }
+    return { ok: true, page: normalizeNavigatePage(page) };
   });
 
   ipcMain.handle('reset-settings', async () => {
@@ -3399,20 +3486,7 @@ function setupIpc() {
   });
 
   ipcMain.handle('floating-get-menu-state', async () => ({
-    open: floatingMenuOpen,
-    dockSide: getSettings().floatingDockSide === 'left' ? 'left' : 'right',
-    menuSide: floatingMenuSide,
-    accumulation: getAccumulationState(),
-    lastCapture: getLastCaptureState(),
-    floatingIconOpacity: (() => {
-      const value = Number(getSettings().floatingIconOpacity);
-      return Number.isFinite(value) ? Math.max(0.2, Math.min(1, value)) : 1;
-    })(),
-    floatingIconCustomPath: (() => String(getSettings().floatingIconCustomPath || '').trim())(),
-    floatingIconCustomUrl: (() => {
-      const filePath = String(getSettings().floatingIconCustomPath || '').trim();
-      return filePath && fs.existsSync(filePath) ? pathToFileURL(filePath).href : '';
-    })()
+    ...buildFloatingMenuPayload()
   }));
 
   ipcMain.handle('open-screenshot-translate', async () => {

@@ -46,9 +46,11 @@ contextBridge.exposeInMainWorld('deskLibrary', {
   deleteBrowserCards: (ids) => ipcRenderer.invoke('delete-browser-cards', ids),
   checkBrowserCardConnectivity: (ids) => ipcRenderer.invoke('check-browser-card-connectivity', ids),
   openMainWindow: () => ipcRenderer.invoke('open-main-window'),
+  openMainWindowPage: (page) => ipcRenderer.invoke('open-main-window-page', page),
   minimizeWindow: () => ipcRenderer.invoke('window-minimize'),
   toggleMaximizeWindow: () => ipcRenderer.invoke('window-toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
-  onSnapshot: (callback) => ipcRenderer.on('snapshot', (_, payload) => callback(payload))
+  onSnapshot: (callback) => ipcRenderer.on('snapshot', (_, payload) => callback(payload)),
+  onNavigatePage: (callback) => ipcRenderer.on('navigate-page', (_, payload) => callback(payload))
 });

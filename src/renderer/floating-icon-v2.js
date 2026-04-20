@@ -75,10 +75,12 @@ function renderMenuState(payload = {}) {
     button.textContent = '';
     button.style.backgroundImage = `url("${customUrl.replace(/"/g, '%22')}")`;
     button.style.backgroundColor = 'transparent';
+    button.style.backgroundSize = 'contain';
   } else {
     button.textContent = active ? `累计\n${accumulation.count || 0}` : 'D';
     button.style.backgroundImage = '';
     button.style.backgroundColor = '';
+    button.style.backgroundSize = 'contain';
   }
 }
 

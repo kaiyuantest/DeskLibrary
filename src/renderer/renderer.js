@@ -3264,4 +3264,11 @@ els.aboutFeedbackForm?.addEventListener('submit', async (event) => {
 });
 
 window.deskLibrary.onSnapshot(applySnapshot);
+window.deskLibrary.onNavigatePage((payload = {}) => {
+  const page = String(payload.page || '').trim();
+  if (!page) return;
+  const allow = new Set(['daily', 'common', 'assets', 'browserCards', 'settings', 'about']);
+  if (!allow.has(page)) return;
+  switchPage(page);
+});
 window.deskLibrary.getInitialData().then(applySnapshot);
