@@ -7,6 +7,26 @@ let pointerStart = null;
 let menuOpen = false;
 let accumulation = { active: false, count: 0 };
 let activePointerId = null;
+let hoverOpening = false;
+let lastOpenRequestAt = 0;
+let dragReady = false;
+let startDragInFlight = false;
+let pendingDragPoint = null;
+let dragMoveRaf = 0;
+
+function queueDragMove() {
+  if (!dragReady || !pendingDragPoint || dragMoveRaf) return;
+  dragMoveRaf = requestAnimationFrame(() => {
+    dragMoveRaf = 0;
+    if (!dragReady || !pendingDragPoint) return;
+    const point = pendingDragPoint;
+    pendingDragPoint = null;
+    window.deskLibraryFloating.dragMove(point).catch(() => {});
+    if (pendingDragPoint) {
+      queueDragMove();
+    }
+  });
+}
 
 function getButtonAnchorPayload() {
   const rect = button.getBoundingClientRect();
@@ -44,6 +64,19 @@ function renderMenuState(payload = {}) {
   }
 }
 
+async function openMenuByHover() {
+  const now = Date.now();
+  if (now - lastOpenRequestAt < 240) return;
+  if (hoverOpening || menuOpen || dragging || activePointerId !== null) return;
+  lastOpenRequestAt = now;
+  hoverOpening = true;
+  try {
+    await window.deskLibraryFloating.openMenu(getButtonAnchorPayload());
+  } finally {
+    hoverOpening = false;
+  }
+}
+
 button.addEventListener('pointerdown', (event) => {
   event.preventDefault();
   dragging = false;
@@ -61,32 +94,49 @@ button.addEventListener('dragstart', (event) => {
   event.preventDefault();
 });
 
-button.addEventListener('pointermove', async (event) => {
+button.addEventListener('pointermove', (event) => {
   if (activePointerId === null || event.pointerId !== activePointerId) return;
   const passedThreshold = !!pointerStart && (
-    Math.abs(event.screenX - pointerStart.x) > 2 || Math.abs(event.screenY - pointerStart.y) > 2
+    Math.abs(event.screenX - pointerStart.x) > 6 || Math.abs(event.screenY - pointerStart.y) > 6
   );
   if (passedThreshold || dragging) {
     moved = true;
   }
   if (!dragging && passedThreshold) {
     dragging = true;
-    await window.deskLibraryFloating.startDrag({
+    startDragInFlight = true;
+    window.deskLibraryFloating.startDrag({
       offsetX: dragOffset?.offsetX || 0,
       offsetY: dragOffset?.offsetY || 0
+    }).then(() => {
+      startDragInFlight = false;
+      dragReady = true;
+      queueDragMove();
+    }).catch(() => {
+      startDragInFlight = false;
+      dragReady = false;
+      dragging = false;
     });
   }
   if (!dragging) return;
-  await window.deskLibraryFloating.dragMove({
+  pendingDragPoint = {
     screenX: event.screenX,
     screenY: event.screenY
-  });
+  };
+  queueDragMove();
 });
 
 button.addEventListener('pointerup', async (event) => {
   if (activePointerId === null || event.pointerId !== activePointerId) return;
-  if (dragging) {
+  if (dragging || startDragInFlight) {
     dragging = false;
+    dragReady = false;
+    startDragInFlight = false;
+    pendingDragPoint = null;
+    if (dragMoveRaf) {
+      cancelAnimationFrame(dragMoveRaf);
+      dragMoveRaf = 0;
+    }
     await window.deskLibraryFloating.endDrag();
   }
   button.releasePointerCapture(event.pointerId);
@@ -97,8 +147,15 @@ button.addEventListener('pointerup', async (event) => {
 
 button.addEventListener('pointercancel', async (event) => {
   if (activePointerId === null || event.pointerId !== activePointerId) return;
-  if (dragging) {
+  if (dragging || startDragInFlight) {
     dragging = false;
+    dragReady = false;
+    startDragInFlight = false;
+    pendingDragPoint = null;
+    if (dragMoveRaf) {
+      cancelAnimationFrame(dragMoveRaf);
+      dragMoveRaf = 0;
+    }
     await window.deskLibraryFloating.endDrag();
   }
   try {
@@ -109,8 +166,27 @@ button.addEventListener('pointercancel', async (event) => {
   dragOffset = null;
 });
 
+window.addEventListener('blur', async () => {
+  if (dragging || startDragInFlight) {
+    dragging = false;
+    dragReady = false;
+    startDragInFlight = false;
+    pendingDragPoint = null;
+    if (dragMoveRaf) {
+      cancelAnimationFrame(dragMoveRaf);
+      dragMoveRaf = 0;
+    }
+    try {
+      await window.deskLibraryFloating.endDrag();
+    } catch {}
+  }
+  activePointerId = null;
+  pointerStart = null;
+  dragOffset = null;
+});
+
 button.addEventListener('click', async () => {
-  if (dragging) {
+  if (dragging || activePointerId !== null) {
     return;
   }
   if (moved) {
@@ -120,7 +196,7 @@ button.addEventListener('click', async () => {
   if (menuOpen) {
     return;
   }
-  await window.deskLibraryFloating.openMenu(getButtonAnchorPayload());
+  await openMenuByHover();
 });
 
 button.addEventListener('dblclick', async (event) => {
@@ -130,21 +206,11 @@ button.addEventListener('dblclick', async (event) => {
     return;
   }
   await window.deskLibraryFloating.openMainWindow();
-  await window.deskLibraryFloating.closeMenu();
 });
 
 button.addEventListener('mouseenter', () => {
   if (dragging) return;
-  window.deskLibraryFloating.setHovered(true);
-});
-
-button.addEventListener('mouseleave', () => {
-  if (dragging) return;
-  window.deskLibraryFloating.setHovered(false);
-});
-
-window.addEventListener('blur', () => {
-  window.deskLibraryFloating.setHovered(false);
+  openMenuByHover();
 });
 
 window.deskLibraryFloating.onMenuState(renderMenuState);

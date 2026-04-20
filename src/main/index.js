@@ -42,6 +42,7 @@ const MAIN_WINDOW_SLIDE_STEP = 20;
 const MAIN_WINDOW_SLIDE_INTERVAL_MS = 10;
 const MAIN_WINDOW_HIDE_DELAY_MS = 220;
 const HOVER_SYNC_INTERVAL_MS = 120;
+const FLOATING_MENU_AUTO_CLOSE_GUARD_MS = 120;
 const ACTIVE_WINDOW_HELPER_PATH = path.join(__dirname, 'bin', 'ActiveWindowInfo.exe');
 
 let mainWindow = null;
@@ -590,13 +591,13 @@ function createFloatingMenuWindow() {
 
   floatingMenuWindow.loadFile(path.join(__dirname, '../renderer/floating.html'));
   floatingMenuWindow.once('ready-to-show', () => {
+    floatingMenuWindow.setIgnoreMouseEvents(true, { forward: true });
+    floatingMenuWindow.showInactive();
     sendFloatingMenuState();
   });
   floatingMenuWindow.on('blur', () => {
     if (!floatingMenuOpen || floatingDragState) return;
-    const recentlyOpened = Date.now() - floatingMenuOpenedAt < 600;
-    if (recentlyOpened) return;
-    closeFloatingMenu();
+    closeFloatingMenu('auto');
   });
 }
 
@@ -613,6 +614,12 @@ function createTray() {
 }
 
 function openFloatingMenu(payload = null) {
+  if (floatingMenuOpen) {
+    if (floatingWindow && !floatingWindow.isDestroyed()) {
+      floatingWindow.moveTop();
+    }
+    return;
+  }
   stopFloatingAnimation();
   floatingAnchorBoundsCache = getAnchorFromMenuOpenPayload(payload) || getStableFloatingAnchorForMenuOpen();
   floatingMenuOpen = true;
@@ -620,7 +627,6 @@ function openFloatingMenu(payload = null) {
   floatingPinnedVisible = true;
   floatingHovered = true;
   clearFloatingHideTimer();
-  positionFloatingWindow({ preserveAnchor: true });
   if (floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
     const menuBounds = getFloatingBounds('visible', true);
     floatingMenuWindow.setBounds({
@@ -629,22 +635,27 @@ function openFloatingMenu(payload = null) {
       width: menuBounds.width,
       height: menuBounds.height
     });
-    if (!floatingMenuWindow.isVisible()) {
-      floatingMenuWindow.showInactive();
-    }
+    floatingMenuWindow.setIgnoreMouseEvents(false);
+    if (!floatingMenuWindow.isVisible()) floatingMenuWindow.showInactive();
+    floatingMenuWindow.moveTop();
+  }
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    floatingWindow.moveTop();
   }
   sendFloatingMenuState();
 }
 
-function closeFloatingMenu() {
+function closeFloatingMenu(reason = 'manual') {
   if (!floatingMenuOpen) return;
+  if (reason !== 'manual' && (Date.now() - floatingMenuOpenedAt < FLOATING_MENU_AUTO_CLOSE_GUARD_MS)) {
+    return;
+  }
   floatingAnchorBoundsCache = getCurrentFloatingAnchorBounds() || floatingAnchorBoundsCache;
   floatingMenuOpen = false;
   floatingPinnedVisible = false;
   if (floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
-    floatingMenuWindow.hide();
+    floatingMenuWindow.setIgnoreMouseEvents(true, { forward: true });
   }
-  positionFloatingWindow({ preserveAnchor: true });
   sendFloatingMenuState();
 }
 
@@ -843,6 +854,30 @@ function syncFloatingWindowVisibility() {
   if (!floatingWindow || floatingWindow.isDestroyed()) return;
   try {
     const settings = getSettings();
+    if (floatingMenuOpen) {
+      if (!settings.floatingIconEnabled) {
+        floatingMenuOpen = false;
+        floatingPinnedVisible = false;
+        floatingWindow.hide();
+        if (floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
+          floatingMenuWindow.hide();
+        }
+      } else {
+        if (!floatingWindow.isVisible()) {
+          floatingWindow.showInactive();
+        }
+        if (floatingMenuWindow && !floatingMenuWindow.isDestroyed() && !floatingMenuWindow.isVisible()) {
+          floatingMenuWindow.showInactive();
+        }
+        if (floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
+          floatingMenuWindow.setIgnoreMouseEvents(false);
+          floatingMenuWindow.moveTop();
+        }
+        floatingWindow.moveTop();
+      }
+      sendFloatingMenuState();
+      return;
+    }
     const dockable = !FLOATING_TEST_DISABLE_DOCK_HIDE
       && settings.dockToEdgeEnabled
       && (settings.floatingDockSide === 'left' || settings.floatingDockSide === 'right')
@@ -875,6 +910,10 @@ function syncFloatingWindowVisibility() {
         });
         if (!floatingMenuWindow.isVisible()) {
           floatingMenuWindow.showInactive();
+        }
+        floatingMenuWindow.moveTop();
+        if (floatingWindow && !floatingWindow.isDestroyed()) {
+          floatingWindow.moveTop();
         }
       }
     } else {
@@ -1964,14 +2003,21 @@ function applySystemSettings(settings) {
 function syncHoverStateFromCursor() {
   const cursor = screen.getCursorScreenPoint();
   const settings = getSettings();
+  const floatingBounds = floatingWindow && !floatingWindow.isDestroyed()
+    ? (getFloatingWindowBounds() || floatingWindow.getBounds())
+    : null;
+  const menuBounds = floatingMenuWindow && !floatingMenuWindow.isDestroyed() && floatingMenuWindow.isVisible()
+    ? floatingMenuWindow.getBounds()
+    : null;
+  const insideFloatingIcon = isPointInsideBounds(cursor, floatingBounds);
+  const insideFloatingMenu = isPointInsideBounds(cursor, menuBounds);
 
-  if (!FLOATING_TEST_DISABLE_HOVER_SYNC && floatingWindow && !floatingWindow.isDestroyed() && settings.floatingIconEnabled) {
-    const floatingBounds = getFloatingWindowBounds() || floatingWindow.getBounds();
+  if (!FLOATING_TEST_DISABLE_HOVER_SYNC && !floatingMenuOpen && floatingWindow && !floatingWindow.isDestroyed() && settings.floatingIconEnabled) {
     const floatingDisplay = screen.getDisplayMatching(floatingBounds);
     const floatingWorkArea = floatingDisplay.workArea;
     const floatingSide = getSettings().floatingDockSide === 'left' ? 'left' : 'right';
     const nextFloatingHovered = !floatingDragState && (
-      isPointInsideBounds(cursor, floatingBounds)
+      insideFloatingIcon
       || (settings.dockToEdgeEnabled && isPointInsideVerticalEdgeZone(
         cursor,
         floatingWorkArea,
@@ -1991,9 +2037,40 @@ function syncHoverStateFromCursor() {
       floatingHideTimer = setTimeout(() => {
         floatingHideTimer = null;
         const latestCursor = screen.getCursorScreenPoint();
-        if (!floatingDragState && floatingWindow && !floatingWindow.isDestroyed() && !isPointInsideBounds(latestCursor, getFloatingWindowBounds() || floatingWindow.getBounds())) {
+        if (!floatingDragState && floatingWindow && !floatingWindow.isDestroyed()) {
+          const latestBounds = getFloatingWindowBounds() || floatingWindow.getBounds();
+          if (!isPointInsideBounds(latestCursor, latestBounds)) {
+            floatingHovered = false;
+            syncFloatingWindowVisibility();
+          }
+        }
+      }, FLOATING_HIDE_DELAY_MS);
+    }
+  }
+
+  if (!FLOATING_TEST_DISABLE_HOVER_SYNC && floatingMenuOpen && !floatingDragState) {
+    const stillInside = insideFloatingIcon || insideFloatingMenu;
+    if (stillInside) {
+      clearFloatingHideTimer();
+      if (!floatingHovered) {
+        floatingHovered = true;
+      }
+    } else if (!floatingHideTimer) {
+      floatingHideTimer = setTimeout(() => {
+        floatingHideTimer = null;
+        if (!floatingMenuOpen || floatingDragState) return;
+        const latestCursor = screen.getCursorScreenPoint();
+        const latestFloatingBounds = floatingWindow && !floatingWindow.isDestroyed()
+          ? (getFloatingWindowBounds() || floatingWindow.getBounds())
+          : null;
+        const latestMenuBounds = floatingMenuWindow && !floatingMenuWindow.isDestroyed() && floatingMenuWindow.isVisible()
+          ? floatingMenuWindow.getBounds()
+          : null;
+        const stillInsideLatest = isPointInsideBounds(latestCursor, latestFloatingBounds)
+          || isPointInsideBounds(latestCursor, latestMenuBounds);
+        if (!stillInsideLatest) {
           floatingHovered = false;
-          syncFloatingWindowVisibility();
+          closeFloatingMenu('auto');
         }
       }, FLOATING_HIDE_DELAY_MS);
     }
@@ -2845,6 +2922,7 @@ function setupIpc() {
       return { ok: false };
     }
 
+    closeFloatingMenu();
     showWindow();
     return { ok: true, visible: true };
   });
@@ -2935,18 +3013,16 @@ function setupIpc() {
   ipcMain.handle('floating-drag-start', async (_, payload = {}) => {
     if (!floatingWindow || floatingWindow.isDestroyed()) return { ok: false };
     stopFloatingAnimation();
-    floatingMenuOpen = false;
-    if (floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
-      floatingMenuWindow.hide();
-    }
     floatingPinnedVisible = true;
     floatingHovered = true;
     clearFloatingHideTimer();
+    if (floatingMenuOpen && floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
+      floatingMenuWindow.setIgnoreMouseEvents(true, { forward: true });
+    }
     floatingDragState = {
       offsetX: Number(payload.offsetX) || 0,
       offsetY: Number(payload.offsetY) || 0
     };
-    sendFloatingMenuState();
     return { ok: true };
   });
 
@@ -2974,6 +3050,19 @@ function setupIpc() {
     };
     floatingBoundsCache = { ...nextBounds, anchorX: nextX, anchorY: nextY };
     setFloatingBoundsWithTrace('floating-drag-move', nextBounds);
+    if (floatingMenuOpen && floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
+      const menuBounds = getFloatingBounds('visible', true);
+      floatingMenuWindow.setBounds({
+        x: menuBounds.x,
+        y: menuBounds.y,
+        width: menuBounds.width,
+        height: menuBounds.height
+      });
+      floatingMenuWindow.moveTop();
+      if (floatingWindow && !floatingWindow.isDestroyed()) {
+        floatingWindow.moveTop();
+      }
+    }
     return { ok: true };
   });
 
@@ -3001,6 +3090,11 @@ function setupIpc() {
       height: FLOATING_WINDOW_SIZE,
       side
     };
+    if (floatingMenuOpen && floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
+      floatingMenuWindow.setIgnoreMouseEvents(false);
+      floatingMenuWindow.moveTop();
+      floatingWindow.moveTop();
+    }
     positionFloatingWindow();
     sendFloatingMenuState();
     sendSnapshot('悬浮图标位置已更新');

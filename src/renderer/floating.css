@@ -35,6 +35,7 @@ body {
   z-index: 1;
   opacity: 1;
   transition: opacity 120ms ease;
+  pointer-events: none;
 }
 
 .floating-menu.hidden {
@@ -71,6 +72,7 @@ body {
   transform: translate(-50%, -50%) translate(var(--dx, 0px), var(--dy, 0px));
   will-change: transform;
   backface-visibility: hidden;
+  pointer-events: auto;
 }
 
 .floating-shell.menu-open .menu-action {

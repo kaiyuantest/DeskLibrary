@@ -13,12 +13,18 @@ const hideFloatingBtn = document.getElementById('hideFloatingBtn');
 let menuOpen = false;
 let accumulation = { active: false, count: 0, finishShortcutLabel: '', cancelShortcutLabel: '' };
 let lastCapture = { available: false, preview: '', shortcutLabel: '' };
+let closeTimer = null;
+
+function clearCloseTimer() {
+  if (!closeTimer) return;
+  clearTimeout(closeTimer);
+  closeTimer = null;
+}
 
 function renderMenuState(payload = {}) {
   menuOpen = !!payload.open;
-  const showMenuVisual = menuOpen;
-  menu.classList.toggle('hidden', !showMenuVisual);
-  shell.classList.toggle('menu-open', showMenuVisual);
+  menu.classList.toggle('hidden', !menuOpen);
+  shell.classList.toggle('menu-open', menuOpen);
   shell.dataset.side = payload.menuSide === 'left' ? 'left' : 'right';
 
   accumulation = payload.accumulation || accumulation;
@@ -51,7 +57,6 @@ function renderMenuState(payload = {}) {
 
 openMainWindowBtn.addEventListener('click', async () => {
   await window.deskLibraryFloating.openMainWindow();
-  await window.deskLibraryFloating.closeMenu();
 });
 
 quickSaveBtn.addEventListener('click', async () => {
@@ -95,11 +100,17 @@ hideFloatingBtn.addEventListener('click', async () => {
 });
 
 window.addEventListener('mouseenter', () => {
-  window.deskLibraryFloating.setHovered(true);
+  clearCloseTimer();
 });
 
 window.addEventListener('mouseleave', () => {
-  window.deskLibraryFloating.setHovered(false);
+  if (!menuOpen) return;
+  clearCloseTimer();
+  closeTimer = setTimeout(async () => {
+    closeTimer = null;
+    if (!menuOpen) return;
+    await window.deskLibraryFloating.closeMenu();
+  }, 80);
 });
 
 window.addEventListener('keydown', async (event) => {
