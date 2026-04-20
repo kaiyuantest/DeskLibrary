@@ -1,0 +1,53 @@
+html,
+body {
+  margin: 0;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+body {
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.floating-action {
+  width: 46px;
+  height: 46px;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  margin: 0;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-app-region: no-drag;
+  appearance: none;
+  -webkit-appearance: none;
+  outline: none;
+  color: #ffffff;
+  font: 700 16px/1 "Microsoft YaHei UI", sans-serif;
+  white-space: pre-line;
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+  box-shadow: none;
+  -webkit-user-drag: none;
+  user-drag: none;
+  touch-action: none;
+}
+
+.floating-action:hover,
+.floating-action:focus,
+.floating-action:focus-visible,
+.floating-action:active {
+  outline: none;
+  box-shadow: none;
+}
+
+.floating-action.accumulating {
+  background: linear-gradient(135deg, #1d4ed8, #163cae);
+  font-size: 12px;
+}
