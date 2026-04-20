@@ -795,6 +795,16 @@ function isPointInsideBounds(point, bounds) {
     && point.y < bounds.y + bounds.height;
 }
 
+function isPointInsideCircleBounds(point, bounds, padding = 0) {
+  if (!point || !bounds) return false;
+  const radius = (Math.min(bounds.width, bounds.height) / 2) + Math.max(0, Number(padding) || 0);
+  const centerX = bounds.x + (bounds.width / 2);
+  const centerY = bounds.y + (bounds.height / 2);
+  const dx = point.x - centerX;
+  const dy = point.y - centerY;
+  return (dx * dx + dy * dy) <= (radius * radius);
+}
+
 function isPointInsideVerticalEdgeZone(point, workArea, side, top, height, triggerSize) {
   if (!point || !workArea) return false;
   const withinY = point.y >= top && point.y < top + height;
@@ -2431,7 +2441,7 @@ function syncHoverStateFromCursor() {
     ? floatingMenuWindow.getBounds()
     : null;
   const insideFloatingIcon = isPointInsideBounds(cursor, floatingBounds);
-  const insideFloatingMenu = isPointInsideBounds(cursor, menuBounds);
+  const insideFloatingMenu = isPointInsideCircleBounds(cursor, menuBounds, 3);
 
   if (!FLOATING_TEST_DISABLE_HOVER_SYNC && !floatingMenuOpen && floatingWindow && !floatingWindow.isDestroyed() && settings.floatingIconEnabled) {
     const floatingDisplay = screen.getDisplayMatching(floatingBounds);
@@ -2470,6 +2480,12 @@ function syncHoverStateFromCursor() {
   }
 
   if (!FLOATING_TEST_DISABLE_HOVER_SYNC && floatingMenuOpen && !floatingDragState) {
+    if (floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
+      floatingMenuWindow.moveTop();
+    }
+    if (floatingWindow && !floatingWindow.isDestroyed()) {
+      floatingWindow.moveTop();
+    }
     const stillInside = insideFloatingIcon || insideFloatingMenu;
     if (stillInside) {
       clearFloatingHideTimer();
@@ -2488,7 +2504,7 @@ function syncHoverStateFromCursor() {
           ? floatingMenuWindow.getBounds()
           : null;
         const stillInsideLatest = isPointInsideBounds(latestCursor, latestFloatingBounds)
-          || isPointInsideBounds(latestCursor, latestMenuBounds);
+          || isPointInsideCircleBounds(latestCursor, latestMenuBounds, 3);
         if (!stillInsideLatest) {
           floatingHovered = false;
           closeFloatingMenu('auto');

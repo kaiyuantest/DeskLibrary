@@ -10,11 +10,14 @@ const undoAccumulationBtn = document.getElementById('undoAccumulationBtn');
 const cancelAccumulationBtn = document.getElementById('cancelAccumulationBtn');
 const screenshotTranslateBtn = document.getElementById('screenshotTranslateBtn');
 const hideFloatingBtn = document.getElementById('hideFloatingBtn');
+const centerHotspotBtn = document.getElementById('centerHotspotBtn');
 
 let menuOpen = false;
 let accumulation = { active: false, count: 0, finishShortcutLabel: '', cancelShortcutLabel: '' };
 let lastCapture = { available: false, preview: '', shortcutLabel: '' };
 let closeTimer = null;
+const CENTER_DOUBLE_CLICK_MS = 280;
+let centerLastClickAt = 0;
 
 function clearCloseTimer() {
   if (!closeTimer) return;
@@ -39,6 +42,7 @@ function renderMenuState(payload = {}) {
   finishAccumulationBtn.classList.toggle('hidden', !active);
   undoAccumulationBtn.classList.toggle('hidden', !active);
   cancelAccumulationBtn.classList.toggle('hidden', !active);
+  hideFloatingBtn.classList.toggle('hidden', active);
 
   const finishDesc = accumulation.finishShortcutLabel
     ? `结束累计（${accumulation.finishShortcutLabel}）`
@@ -104,6 +108,20 @@ hideFloatingBtn.addEventListener('click', async () => {
   await window.deskLibraryFloating.disableFloatingIcon();
   await window.deskLibraryFloating.closeMenu();
 });
+
+if (centerHotspotBtn) {
+  centerHotspotBtn.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const now = Date.now();
+    if (now - centerLastClickAt <= CENTER_DOUBLE_CLICK_MS) {
+      centerLastClickAt = 0;
+      await window.deskLibraryFloating.openMainWindow();
+      return;
+    }
+    centerLastClickAt = now;
+  });
+}
 
 window.addEventListener('mouseenter', () => {
   clearCloseTimer();

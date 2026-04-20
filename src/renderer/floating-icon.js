@@ -1,4 +1,6 @@
 const button = document.getElementById('floatingAction');
+const DOUBLE_CLICK_DELAY_MS = 280;
+const HOVER_OPEN_DELAY_MS = 260;
 
 let dragging = false;
 let moved = false;
@@ -13,6 +15,22 @@ let dragReady = false;
 let startDragInFlight = false;
 let pendingDragPoint = null;
 let dragMoveRaf = 0;
+let clickTimer = null;
+let hoverOpenTimer = null;
+let lastClickAt = 0;
+let hoverSuppressedUntil = 0;
+
+function clearClickTimer() {
+  if (!clickTimer) return;
+  clearTimeout(clickTimer);
+  clickTimer = null;
+}
+
+function clearHoverOpenTimer() {
+  if (!hoverOpenTimer) return;
+  clearTimeout(hoverOpenTimer);
+  hoverOpenTimer = null;
+}
 
 function queueDragMove() {
   if (!dragReady || !pendingDragPoint || dragMoveRaf) return;
@@ -66,6 +84,7 @@ function renderMenuState(payload = {}) {
 
 async function openMenuByHover() {
   const now = Date.now();
+  if (now < hoverSuppressedUntil) return;
   if (now - lastOpenRequestAt < 240) return;
   if (hoverOpening || menuOpen || dragging || activePointerId !== null) return;
   lastOpenRequestAt = now;
@@ -79,6 +98,8 @@ async function openMenuByHover() {
 
 button.addEventListener('pointerdown', (event) => {
   event.preventDefault();
+  clearHoverOpenTimer();
+  hoverSuppressedUntil = Date.now() + 420;
   dragging = false;
   moved = false;
   activePointerId = event.pointerId;
@@ -167,6 +188,8 @@ button.addEventListener('pointercancel', async (event) => {
 });
 
 window.addEventListener('blur', async () => {
+  clearClickTimer();
+  clearHoverOpenTimer();
   if (dragging || startDragInFlight) {
     dragging = false;
     dragReady = false;
@@ -193,24 +216,37 @@ button.addEventListener('click', async () => {
     moved = false;
     return;
   }
+  const now = Date.now();
+  if (now - lastClickAt <= DOUBLE_CLICK_DELAY_MS) {
+    lastClickAt = 0;
+    clearClickTimer();
+    hoverSuppressedUntil = now + 520;
+    await window.deskLibraryFloating.openMainWindow();
+    return;
+  }
+  lastClickAt = now;
+  clearClickTimer();
   if (menuOpen) {
     return;
   }
-  await openMenuByHover();
-});
-
-button.addEventListener('dblclick', async (event) => {
-  event.preventDefault();
-  if (moved) {
-    moved = false;
-    return;
-  }
-  await window.deskLibraryFloating.openMainWindow();
+  clickTimer = setTimeout(() => {
+    clickTimer = null;
+    lastClickAt = 0;
+    openMenuByHover().catch(() => {});
+  }, DOUBLE_CLICK_DELAY_MS);
 });
 
 button.addEventListener('mouseenter', () => {
   if (dragging) return;
-  openMenuByHover();
+  clearHoverOpenTimer();
+  hoverOpenTimer = setTimeout(() => {
+    hoverOpenTimer = null;
+    openMenuByHover().catch(() => {});
+  }, HOVER_OPEN_DELAY_MS);
+});
+
+button.addEventListener('mouseleave', () => {
+  clearHoverOpenTimer();
 });
 
 window.deskLibraryFloating.onMenuState(renderMenuState);

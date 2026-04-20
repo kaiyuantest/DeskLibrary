@@ -53,6 +53,30 @@ body {
   -webkit-app-region: no-drag;
 }
 
+.center-hotspot {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 82px;
+  height: 82px;
+  margin: 0;
+  border: 0;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  background: transparent;
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.center-hotspot:focus,
+.center-hotspot:focus-visible,
+.center-hotspot:hover,
+.center-hotspot:active {
+  outline: none;
+  box-shadow: none;
+}
+
 .menu-action {
   position: absolute;
   top: 50%;
@@ -123,5 +147,5 @@ body {
 .menu-action.orb-start { --dx: 0px; --dy: 86px; }
 .menu-action.orb-undo { --dx: -60px; --dy: 60px; }
 .menu-action.orb-cancel { --dx: -86px; --dy: 0px; }
-.menu-action.orb-ocr { --dx: 86px; --dy: 86px; }
-.menu-action.orb-hide { --dx: -60px; --dy: -60px; }
+.menu-action.orb-ocr { --dx: -60px; --dy: -60px; }
+.menu-action.orb-hide { --dx: -86px; --dy: 0px; }
