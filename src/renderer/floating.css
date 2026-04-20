@@ -19,6 +19,8 @@ body {
   position: relative;
   width: 100%;
   height: 100%;
+  overflow: visible;
+  border-radius: 50%;
 }
 
 .floating-menu {
@@ -30,6 +32,15 @@ body {
   border-radius: 50%;
   background: radial-gradient(circle at center, rgba(37, 99, 235, 0.14), rgba(37, 99, 235, 0.04) 58%, transparent 72%);
   border: 1px solid rgba(133, 176, 255, 0.35);
+  z-index: 1;
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+.floating-menu.hidden {
+  display: block !important;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .menu-action,
@@ -47,7 +58,7 @@ body {
   left: 50%;
   width: 42px;
   height: 42px;
-  margin: -21px 0 0 -21px;
+  margin: 0;
   border-radius: 50%;
   display: grid;
   place-items: center;
@@ -55,12 +66,25 @@ body {
   background: linear-gradient(135deg, rgba(24, 73, 179, 0.98), rgba(46, 120, 232, 0.98));
   border: 1px solid rgba(173, 208, 255, 0.46);
   font: 700 14px/1 "Microsoft YaHei UI", sans-serif;
-  transition: transform 120ms ease, box-shadow 120ms ease, opacity 120ms ease;
+  opacity: 0;
+  transition: box-shadow 120ms ease, opacity 120ms ease;
+  transform: translate(-50%, -50%) translate(var(--dx, 0px), var(--dy, 0px));
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
+.floating-shell.menu-open .menu-action {
+  opacity: 1;
 }
 
 .menu-action:hover:not(:disabled) {
-  transform: translate(calc(var(--dx, 0px) * 1.06), calc(var(--dy, 0px) * 1.06));
   box-shadow: 0 10px 22px rgba(25, 75, 180, 0.36);
+}
+
+.menu-action:hover,
+.menu-action:focus,
+.menu-action:active {
+  transform: translate(-50%, -50%) translate(var(--dx, 0px), var(--dy, 0px));
 }
 
 .menu-action::after {
@@ -90,54 +114,53 @@ body {
   opacity: 0.52;
 }
 
-.menu-action.orb-main { --dx: 0px; --dy: -86px; transform: translate(var(--dx), var(--dy)); }
-.menu-action.orb-quick { --dx: 60px; --dy: -60px; transform: translate(var(--dx), var(--dy)); }
-.menu-action.orb-common { --dx: 86px; --dy: 0px; transform: translate(var(--dx), var(--dy)); }
-.menu-action.orb-delete { --dx: 60px; --dy: 60px; transform: translate(var(--dx), var(--dy)); }
-.menu-action.orb-start { --dx: 0px; --dy: 86px; transform: translate(var(--dx), var(--dy)); }
-.menu-action.orb-undo { --dx: -60px; --dy: 60px; transform: translate(var(--dx), var(--dy)); }
-.menu-action.orb-cancel { --dx: -86px; --dy: 0px; transform: translate(var(--dx), var(--dy)); }
-.menu-action.orb-hide { --dx: -60px; --dy: -60px; transform: translate(var(--dx), var(--dy)); }
-
-.floating-shell.menu-open .floating-action {
-  top: 50%;
-  left: 50%;
-  right: auto;
-  transform: translate(-50%, -50%);
-}
+.menu-action.orb-main { --dx: 0px; --dy: -86px; }
+.menu-action.orb-quick { --dx: 60px; --dy: -60px; }
+.menu-action.orb-common { --dx: 86px; --dy: 0px; }
+.menu-action.orb-delete { --dx: 60px; --dy: 60px; }
+.menu-action.orb-start { --dx: 0px; --dy: 86px; }
+.menu-action.orb-undo { --dx: -60px; --dy: 60px; }
+.menu-action.orb-cancel { --dx: -86px; --dy: 0px; }
+.menu-action.orb-hide { --dx: -60px; --dy: -60px; }
 
 .floating-action {
   position: absolute;
-  top: 1px;
-  right: 1px;
+  top: 50%;
+  left: 50%;
+  right: auto;
   width: 46px;
   height: 46px;
+  margin: 0;
   border-radius: 999px;
+  overflow: hidden;
+  background-clip: padding-box;
   background: linear-gradient(135deg, #2563eb, #1d4ed8);
   color: #fff;
   font: 700 16px/1 "Microsoft YaHei UI", sans-serif;
   white-space: pre-line;
   box-shadow: none;
-  transition: transform 120ms ease, box-shadow 120ms ease, background 120ms ease;
-}
-
-.floating-shell[data-side="left"] .floating-action {
-  left: 0;
-  right: auto;
-}
-
-.floating-shell.menu-open[data-side="left"] .floating-action {
-  left: 50%;
-  right: auto;
+  transform: translate3d(-50%, -50%, 0);
+  transition: box-shadow 120ms ease, background 120ms ease, opacity 120ms ease;
+  outline: none;
+  backface-visibility: hidden;
+  z-index: 2;
+  appearance: none;
+  -webkit-appearance: none;
+  padding: 0;
+  line-height: 1;
 }
 
 .floating-action:hover {
-  transform: translateY(-1px);
-  box-shadow: none;
+  box-shadow: 0 0 0 2px rgba(120, 173, 255, 0.28);
 }
 
-.floating-shell.menu-open .floating-action:hover {
-  transform: translate(-50%, -52%);
+.floating-action:active,
+.floating-action:focus,
+.floating-action:focus-visible {
+  top: 50%;
+  left: 50%;
+  transform: translate3d(-50%, -50%, 0);
+  outline: none;
 }
 
 .floating-action.accumulating {

@@ -2,6 +2,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('deskLibraryFloating', {
   openMainWindow: () => ipcRenderer.invoke('open-main-window'),
+  openMenu: (payload) => ipcRenderer.invoke('floating-open-menu', payload),
   toggleMenu: () => ipcRenderer.invoke('floating-toggle-menu'),
   closeMenu: () => ipcRenderer.invoke('floating-close-menu'),
   getMenuState: () => ipcRenderer.invoke('floating-get-menu-state'),
