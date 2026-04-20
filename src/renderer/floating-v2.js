@@ -95,7 +95,7 @@ class FloatingCircleMenu {
     this.searchInput.addEventListener('input', () => {
       if (!searchInputState.active) return;
       if (searchInputState.composing) return;
-      const category = this.searchInput.dataset.category === 'common' ? 'common' : (searchInputState.category === 'common' ? 'common' : 'daily');
+      const category = normalizeSearchCategory(this.searchInput.dataset.category || searchInputState.category);
       searchInputState.keyword = this.searchInput.value || '';
       queueSearchApply(category, searchInputState.keyword);
     });
@@ -105,7 +105,7 @@ class FloatingCircleMenu {
     this.searchInput.addEventListener('compositionend', () => {
       if (!searchInputState.active) return;
       searchInputState.composing = false;
-      const category = this.searchInput.dataset.category === 'common' ? 'common' : (searchInputState.category === 'common' ? 'common' : 'daily');
+      const category = normalizeSearchCategory(this.searchInput.dataset.category || searchInputState.category);
       searchInputState.keyword = this.searchInput.value || '';
       queueSearchApply(category, searchInputState.keyword);
     });
@@ -218,8 +218,9 @@ class FloatingCircleMenu {
   }
 
   openSearchBranch(category) {
-    const groupId = category === 'common' ? 'common' : 'save';
-    const searchId = `search.${category === 'common' ? 'common' : 'daily'}`;
+    const normalized = normalizeSearchCategory(category);
+    const groupId = normalized === 'common' ? 'common' : normalized === 'assets' ? 'assets' : 'save';
+    const searchId = `search.${normalized}`;
     const rootChildren = Array.isArray(this.options.tree?.children) ? this.options.tree.children : [];
     const firstLevel = this.limitLayerNodes(rootChildren, 0);
     const groupNode = firstLevel.find((item) => item.id === groupId);
@@ -296,12 +297,16 @@ class FloatingCircleMenu {
 
   showSearchInput(value = '', category = 'daily') {
     if (!this.searchInput) return;
-    const normalized = category === 'common' ? 'common' : 'daily';
+    const normalized = normalizeSearchCategory(category);
     this.searchInput.classList.add('visible');
     this.searchInput.value = String(value || '');
     this.searchInput.dataset.category = normalized;
-    this.searchInput.placeholder = normalized === 'common' ? '搜索常用内容，自动出结果' : '搜索每日内容，自动出结果';
-    const nodeId = normalized === 'common' ? 'search.common' : 'search.daily';
+    this.searchInput.placeholder = normalized === 'common'
+      ? '搜索常用内容，自动出结果'
+      : normalized === 'assets'
+        ? '搜索资源库，自动出结果'
+        : '搜索每日内容，自动出结果';
+    const nodeId = normalized === 'common' ? 'search.common' : normalized === 'assets' ? 'search.assets' : 'search.daily';
     this.positionSearchInputByNodeId(nodeId);
     setTimeout(() => {
       try {
@@ -632,6 +637,13 @@ function shortLabel(value, len = 6) {
   return text.length <= len ? text : `${text.slice(0, len)}…`;
 }
 
+function normalizeSearchCategory(category) {
+  const raw = String(category || '').trim().toLowerCase();
+  if (raw === 'common') return 'common';
+  if (raw === 'assets') return 'assets';
+  return 'daily';
+}
+
 function buildRecordNode(record, category) {
   const id = Number(record.id);
   const title = String(record.title || '未命名').trim() || '未命名';
@@ -671,30 +683,60 @@ function buildSearchResultNode(record, category) {
   };
 }
 
+function buildAssetNode(asset, source = 'recent') {
+  const id = Number(asset.id);
+  const title = String(asset.title || '未命名资源').trim() || '未命名资源';
+  const preview = String(asset.preview || '').trim();
+  return {
+    id: `${source}.asset.${id}`,
+    label: shortLabel(title, 6),
+    tip: preview || title,
+    children: [
+      { id: `${source}.asset.${id}.open`, label: '打开', action: { type: 'open-asset-primary', id, title } },
+      { id: `${source}.asset.${id}.locate`, label: '定位', action: { type: 'open-asset-location', id, title } },
+      { id: `${source}.asset.${id}.delete`, label: '删除', action: { type: 'delete-asset', id, title }, danger: true }
+    ]
+  };
+}
+
 function buildSearchBranch(category) {
-  const current = category === 'common' ? searchState.common : searchState.daily;
+  const normalized = normalizeSearchCategory(category);
+  const current = normalized === 'common'
+    ? searchState.common
+    : normalized === 'assets'
+      ? searchState.assets
+      : searchState.daily;
   const isActive = searchInputState.active && searchInputState.category === category;
   const typingKeyword = isActive ? searchInputState.keyword : current.keyword;
   const label = typingKeyword ? `搜:${shortLabel(typingKeyword, 4)}` : '搜索';
   const children = [];
   if (current.keyword) {
-    children.push({ id: `search.${category}.clear`, label: '清空', action: { type: 'clear-search-records', category } });
+    children.push({ id: `search.${normalized}.clear`, label: '清空', action: { type: 'clear-search-records', category: normalized } });
   }
   if (Array.isArray(current.results) && current.results.length) {
     current.results.forEach((item) => {
-      children.push(buildSearchResultNode(item, category));
+      if (normalized === 'assets') {
+        children.push(buildAssetNode(item, 'search'));
+      } else {
+        children.push(buildSearchResultNode(item, normalized));
+      }
     });
   } else if (current.keyword) {
-    children.push({ id: `search.${category}.empty`, label: '无结果', action: { type: 'noop', message: `未找到“${current.keyword}”` } });
+    children.push({ id: `search.${normalized}.empty`, label: '无结果', action: { type: 'noop', message: `未找到“${current.keyword}”` } });
   }
 
+  const searchTip = normalized === 'common'
+    ? '搜索常用记录'
+    : normalized === 'assets'
+      ? '搜索资源库'
+      : '搜索每日记录';
   return {
-    id: `search.${category}`,
+    id: `search.${normalized}`,
     label,
     tip: isActive
       ? `输入中：${typingKeyword || '...'}（Esc 取消）`
-      : `${category === 'common' ? '搜索常用记录' : '搜索每日记录'}（双击输入）`,
-    action: { type: 'search-records', category },
+      : `${searchTip}（双击输入）`,
+    action: { type: 'search-records', category: normalized },
     children
   };
 }
@@ -702,6 +744,7 @@ function buildSearchBranch(category) {
 function buildMenuTree(payload = {}) {
   const recentDaily = Array.isArray(payload.recentDailyRecords) ? payload.recentDailyRecords.slice(0, 4) : [];
   const recentCommon = Array.isArray(payload.recentCommonRecords) ? payload.recentCommonRecords.slice(0, 4) : [];
+  const recentAssets = Array.isArray(payload.recentAssets) ? payload.recentAssets.slice(0, 4) : [];
   const accumulation = payload.accumulation || {};
   const accActive = !!accumulation.active;
   const deleteTip = payload.lastCapture && payload.lastCapture.available
@@ -777,20 +820,28 @@ function buildMenuTree(payload = {}) {
             ]
       },
       {
+        id: 'assets',
+        label: '资',
+        tip: '资源入口',
+        children: [
+          { id: 'assets.open', label: '资源库', action: { type: 'goto-page', page: 'assets' } },
+          {
+            id: 'assets.recent',
+            label: '最近4条',
+            children: recentAssets.length
+              ? recentAssets.map((item) => buildAssetNode(item, 'recent'))
+              : [{ id: 'assets.empty', label: '空', action: { type: 'noop', message: '最近没有资源记录' } }]
+          },
+          buildSearchBranch('assets')
+        ]
+      },
+      {
         id: 'ocr',
         label: '译',
         tip: '截图翻译',
         children: [
           { id: 'ocr.start', label: '截图', action: { type: 'ocr-start' } },
           { id: 'ocr.main', label: '主窗', action: { type: 'open-main-window' } }
-        ]
-      },
-      {
-        id: 'assets',
-        label: '资',
-        tip: '资源入口',
-        children: [
-          { id: 'assets.open', label: '资源库', action: { type: 'goto-page', page: 'assets' } }
         ]
       },
       {
@@ -858,14 +909,16 @@ async function runFloatingAction(action, node) {
         : { ok: true, message: '已打开记录详情' };
     }
     case 'search-records': {
-      const category = action && action.category === 'common' ? 'common' : 'daily';
+      const category = normalizeSearchCategory(action && action.category);
       startSearchInput(category);
       return { ok: true, message: '已进入搜索输入', keepOpen: true };
     }
     case 'clear-search-records': {
-      const category = action && action.category === 'common' ? 'common' : 'daily';
+      const category = normalizeSearchCategory(action && action.category);
       if (category === 'common') {
         searchState.common = { keyword: '', results: [] };
+      } else if (category === 'assets') {
+        searchState.assets = { keyword: '', results: [] };
       } else {
         searchState.daily = { keyword: '', results: [] };
       }
@@ -901,6 +954,24 @@ async function runFloatingAction(action, node) {
       return result && result.ok === false
         ? { ok: false, message: result.message || '删除失败' }
         : { ok: true, message: `已删除：${action.title || node.label || ''}` };
+    }
+    case 'open-asset-primary': {
+      const result = await window.deskLibraryFloating.openAssetPrimary(Number(action.id));
+      return result && result.ok === false
+        ? { ok: false, message: result.message || '打开失败' }
+        : { ok: true, message: `已打开：${action.title || node.label || ''}` };
+    }
+    case 'open-asset-location': {
+      const result = await window.deskLibraryFloating.openAssetLocation(Number(action.id));
+      return result && result.ok === false
+        ? { ok: false, message: result.message || '定位失败' }
+        : { ok: true, message: `已定位：${action.title || node.label || ''}` };
+    }
+    case 'delete-asset': {
+      const result = await window.deskLibraryFloating.deleteAsset(Number(action.id));
+      return result && result.ok === false
+        ? { ok: false, message: result.message || '删除失败' }
+        : { ok: true, message: `已删除资源：${action.title || node.label || ''}` };
     }
     case 'delete-last': {
       const result = await window.deskLibraryFloating.deleteLastCapture();
@@ -947,7 +1018,8 @@ let latestPayload = {};
 let lastTreeSignature = '';
 const searchState = {
   daily: { keyword: '', results: [] },
-  common: { keyword: '', results: [] }
+  common: { keyword: '', results: [] },
+  assets: { keyword: '', results: [] }
 };
 const searchInputState = {
   active: false,
@@ -957,10 +1029,12 @@ const searchInputState = {
 };
 
 async function performSearch(category, keyword) {
-  const normalizedCategory = category === 'common' ? 'common' : 'daily';
+  const normalizedCategory = normalizeSearchCategory(category);
   const trimmed = String(keyword || '').trim();
   if (normalizedCategory === 'common') {
     searchState.common.keyword = trimmed;
+  } else if (normalizedCategory === 'assets') {
+    searchState.assets.keyword = trimmed;
   } else {
     searchState.daily.keyword = trimmed;
   }
@@ -968,6 +1042,8 @@ async function performSearch(category, keyword) {
   if (!trimmed) {
     if (normalizedCategory === 'common') {
       searchState.common.results = [];
+    } else if (normalizedCategory === 'assets') {
+      searchState.assets.results = [];
     } else {
       searchState.daily.results = [];
     }
@@ -975,17 +1051,24 @@ async function performSearch(category, keyword) {
     return { ok: true, count: 0 };
   }
 
-  const result = await window.deskLibraryFloating.searchRecords({
-    category: normalizedCategory,
-    keyword: trimmed,
-    limit: 12
-  });
+  const result = normalizedCategory === 'assets'
+    ? await window.deskLibraryFloating.searchAssets({
+        keyword: trimmed,
+        limit: 12
+      })
+    : await window.deskLibraryFloating.searchRecords({
+        category: normalizedCategory,
+        keyword: trimmed,
+        limit: 12
+      });
   if (!result || result.ok === false) {
     return { ok: false, message: (result && result.message) || '搜索失败' };
   }
   const list = Array.isArray(result.results) ? result.results : [];
   if (normalizedCategory === 'common') {
     searchState.common.results = list;
+  } else if (normalizedCategory === 'assets') {
+    searchState.assets.results = list;
   } else {
     searchState.daily.results = list;
   }
@@ -1008,7 +1091,11 @@ function stopSearchInput(cancelOnly = false, keepMenuOpen = true) {
     applyMenuState({ ...latestPayload, open: true });
   }
   if (!cancelOnly) {
-    const current = category === 'common' ? searchState.common : searchState.daily;
+    const current = category === 'common'
+      ? searchState.common
+      : category === 'assets'
+        ? searchState.assets
+        : searchState.daily;
     menu.showMessage(`搜索完成：${current.results.length} 条`);
   } else {
     menu.showMessage('已取消搜索输入');
@@ -1030,8 +1117,12 @@ function queueSearchApply(category, keyword) {
 }
 
 function startSearchInput(category) {
-  const normalized = category === 'common' ? 'common' : 'daily';
-  const current = normalized === 'common' ? searchState.common : searchState.daily;
+  const normalized = normalizeSearchCategory(category);
+  const current = normalized === 'common'
+    ? searchState.common
+    : normalized === 'assets'
+      ? searchState.assets
+      : searchState.daily;
   searchInputState.active = true;
   searchInputState.category = normalized;
   searchInputState.keyword = current.keyword || '';
@@ -1077,8 +1168,10 @@ function applyMenuState(payload = {}) {
     lastCapture: latestPayload.lastCapture && latestPayload.lastCapture.preview ? latestPayload.lastCapture.preview : '',
     recentDaily: (latestPayload.recentDailyRecords || []).map((item) => `${item.id}:${item.title || ''}:${item.preview || ''}`),
     recentCommon: (latestPayload.recentCommonRecords || []).map((item) => `${item.id}:${item.title || ''}:${item.preview || ''}`),
+    recentAssets: (latestPayload.recentAssets || []).map((item) => `${item.id}:${item.title || ''}:${item.preview || ''}`),
     searchDaily: `${searchState.daily.keyword}|${(searchState.daily.results || []).map((item) => item.id).join(',')}`,
-    searchCommon: `${searchState.common.keyword}|${(searchState.common.results || []).map((item) => item.id).join(',')}`
+    searchCommon: `${searchState.common.keyword}|${(searchState.common.results || []).map((item) => item.id).join(',')}`,
+    searchAssets: `${searchState.assets.keyword}|${(searchState.assets.results || []).map((item) => item.id).join(',')}`
   });
 
   menu.silentClosing = true;
@@ -1093,7 +1186,7 @@ function applyMenuState(payload = {}) {
       menu.showMenu();
     }
     if (searchInputState.active) {
-      const category = searchInputState.category === 'common' ? 'common' : 'daily';
+      const category = normalizeSearchCategory(searchInputState.category);
       menu.openSearchBranch(category);
       menu.showSearchInput(searchInputState.keyword || '', category);
     }

@@ -1483,6 +1483,22 @@ function getFloatingRecentRecords(category, limit = 4) {
   }));
 }
 
+function getFloatingRecentAssets(limit = 4) {
+  const list = storage.getAllAssets()
+    .slice(0, Math.max(1, Number(limit) || 4))
+    .map((item) => normalizeAsset(item));
+
+  return list.map((item) => ({
+    id: item.id,
+    title: item.name || '未命名资源',
+    preview: item.note || item.primaryPath || '',
+    entryType: item.entryType || 'file',
+    mode: item.mode || 'link',
+    status: item.statusDisplay || '',
+    updatedAt: item.updatedAt || item.createdAt || ''
+  }));
+}
+
 function buildFloatingMenuPayload() {
   const settings = getSettings();
   const customPath = String(settings.floatingIconCustomPath || '').trim();
@@ -1502,7 +1518,8 @@ function buildFloatingMenuPayload() {
     floatingIconCustomPath: customPath,
     floatingIconCustomUrl: customIconUrl,
     recentDailyRecords: getFloatingRecentRecords('daily', 4),
-    recentCommonRecords: getFloatingRecentRecords('common', 4)
+    recentCommonRecords: getFloatingRecentRecords('common', 4),
+    recentAssets: getFloatingRecentAssets(4)
   };
 }
 
@@ -2846,6 +2863,7 @@ function setupIpc() {
       const paths = Array.isArray(payload.paths) ? payload.paths : [];
       const imported = storage.importAssets(paths.map((sourcePath) => ({ sourcePath })), mode);
       sendSnapshot(imported.length ? '资源已导入' : '没有可导入的新资源');
+      sendFloatingMenuState();
       return { ok: true, count: imported.length };
     } catch (error) {
       const message = error && error.message ? error.message : '导入失败';
@@ -3354,6 +3372,7 @@ function setupIpc() {
   ipcMain.handle('update-asset-note', async (_, payload = {}) => {
     const result = storage.updateAsset(payload.id, { note: payload.note || '' });
     sendSnapshot('资源备注已保存');
+    sendFloatingMenuState();
     return { ok: !!result };
   });
 
@@ -3395,6 +3414,7 @@ function setupIpc() {
   ipcMain.handle('delete-asset', async (_, id) => {
     const ok = storage.deleteAsset(id);
     sendSnapshot('资源已删除');
+    sendFloatingMenuState();
     return { ok };
   });
 
@@ -3665,6 +3685,49 @@ function setupIpc() {
       category,
       keyword: keywordRaw,
       results: records
+    };
+  });
+
+  ipcMain.handle('floating-search-assets', async (_, payload = {}) => {
+    const keywordRaw = String((payload && payload.keyword) || '').trim();
+    const keyword = keywordRaw.toLowerCase();
+    const limit = Math.max(1, Math.min(50, Number((payload && payload.limit) || 12)));
+
+    if (!keyword) {
+      return { ok: true, keyword: '', results: [] };
+    }
+
+    const results = storage.getAllAssets()
+      .map((item) => normalizeAsset(item))
+      .filter((item) => {
+        const haystack = [
+          item.name,
+          item.note,
+          item.modeDisplay,
+          item.entryTypeDisplay,
+          item.statusDisplay,
+          item.primaryPath,
+          item.sourcePathDisplay,
+          item.storedPathDisplay
+        ].join('\n').toLowerCase();
+        return haystack.includes(keyword);
+      })
+      .sort((left, right) => new Date(right.updatedAt || right.createdAt).getTime() - new Date(left.updatedAt || left.createdAt).getTime())
+      .slice(0, limit)
+      .map((item) => ({
+        id: item.id,
+        title: item.name || '未命名资源',
+        preview: item.note || item.primaryPath || '',
+        entryType: item.entryType || 'file',
+        mode: item.mode || 'link',
+        status: item.statusDisplay || '',
+        updatedAt: item.updatedAt || item.createdAt || ''
+      }));
+
+    return {
+      ok: true,
+      keyword: keywordRaw,
+      results
     };
   });
 
