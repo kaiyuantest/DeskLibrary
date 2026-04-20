@@ -27,9 +27,9 @@ const FLOATING_SLIDE_STEP = 8;
 const FLOATING_SLIDE_INTERVAL_MS = 10;
 const FLOATING_HIDE_DELAY_MS = 180;
 const FLOATING_EDGE_TRIGGER_SIZE = 18;
-const FLOATING_MENU_GAP = 14;
-const FLOATING_MENU_WIDTH = 252;
-const FLOATING_MENU_HEIGHT = 560;
+const FLOATING_MENU_GAP = 0;
+const FLOATING_MENU_WIDTH = 228;
+const FLOATING_MENU_HEIGHT = 228;
 const MAIN_WINDOW_DOCK_THRESHOLD = 12;
 const MAIN_WINDOW_VISIBLE_SLIVER = 2;
 const MAIN_WINDOW_HIDDEN_OVERDRAW = 14;
@@ -269,28 +269,22 @@ function getFloatingBounds(mode = 'hidden', expanded = floatingMenuOpen) {
   const workArea = display.workArea;
   const side = anchor.side || (getSettings().floatingDockSide === 'left' ? 'left' : 'right');
   const buttonSize = FLOATING_WINDOW_SIZE;
-  const width = expanded ? FLOATING_MENU_WIDTH + FLOATING_MENU_GAP + buttonSize : buttonSize;
+  const width = expanded ? FLOATING_MENU_WIDTH : buttonSize;
   const availableHeight = Math.max(buttonSize, workArea.height - FLOATING_WINDOW_MARGIN * 2);
-  const height = expanded ? Math.min(availableHeight, Math.max(FLOATING_MENU_HEIGHT, buttonSize)) : buttonSize;
+  const height = expanded ? Math.min(availableHeight, FLOATING_MENU_HEIGHT) : buttonSize;
   const maxX = workArea.x + workArea.width - width;
   const maxY = workArea.y + workArea.height - height;
   let x = anchor.x;
   let y = Math.max(workArea.y, Math.min(anchor.y, maxY));
 
   if (expanded) {
-    const anchorLeft = anchor.x;
-    const anchorTop = anchor.y;
-    const leftSpace = anchorLeft - workArea.x;
-    const rightSpace = workArea.x + workArea.width - (anchorLeft + buttonSize);
-    const buttonSide = side
-      ? side
-      : (leftSpace >= FLOATING_MENU_WIDTH + FLOATING_MENU_GAP || leftSpace >= rightSpace ? 'right' : 'left');
-    floatingMenuSide = buttonSide;
-    x = buttonSide === 'right'
-      ? anchorLeft - (FLOATING_MENU_WIDTH + FLOATING_MENU_GAP)
-      : anchorLeft;
+    const centerX = anchor.x + (buttonSize / 2);
+    const centerY = anchor.y + (buttonSize / 2);
+    x = Math.round(centerX - (width / 2));
+    y = Math.round(centerY - (height / 2));
     x = Math.max(workArea.x, Math.min(x, maxX));
-    y = Math.max(workArea.y, Math.min(anchorTop, maxY));
+    y = Math.max(workArea.y, Math.min(y, maxY));
+    floatingMenuSide = side === 'left' ? 'left' : 'right';
   } else {
     floatingMenuSide = side === 'left' ? 'left' : 'right';
     x = Math.max(workArea.x, Math.min(anchor.x, maxX));
@@ -436,15 +430,14 @@ function getCurrentFloatingAnchorBounds() {
 
   const bounds = floatingWindow.getBounds();
   if (floatingMenuOpen) {
-    const anchorX = floatingMenuSide === 'left'
-      ? bounds.x
-      : bounds.x + bounds.width - FLOATING_WINDOW_SIZE;
+    const anchorX = Math.round(bounds.x + ((bounds.width - FLOATING_WINDOW_SIZE) / 2));
+    const anchorY = Math.round(bounds.y + ((bounds.height - FLOATING_WINDOW_SIZE) / 2));
     return {
       x: anchorX,
-      y: bounds.y,
+      y: anchorY,
       width: FLOATING_WINDOW_SIZE,
       height: FLOATING_WINDOW_SIZE,
-      side: floatingMenuSide
+      side: getSettings().floatingDockSide === 'left' ? 'left' : 'right'
     };
   }
 
@@ -479,6 +472,7 @@ function createFloatingWindow() {
     height: FLOATING_WINDOW_SIZE,
     frame: false,
     transparent: true,
+    backgroundColor: '#00000000',
     resizable: false,
     maximizable: false,
     minimizable: false,
@@ -822,12 +816,22 @@ function sendFloatingMenuState() {
   if (!floatingWindow || floatingWindow.isDestroyed() || !floatingWindow.webContents || floatingWindow.webContents.isDestroyed()) {
     return;
   }
+  const settings = getSettings();
+  const customPath = String(settings.floatingIconCustomPath || '').trim();
+  const customIconUrl = customPath && fs.existsSync(customPath)
+    ? pathToFileURL(customPath).href
+    : '';
+  const opacityRaw = Number(settings.floatingIconOpacity);
+  const floatingIconOpacity = Number.isFinite(opacityRaw) ? Math.max(0.2, Math.min(1, opacityRaw)) : 1;
   floatingWindow.webContents.send('floating-menu-state', {
     open: floatingMenuOpen,
-    dockSide: getSettings().floatingDockSide === 'left' ? 'left' : 'right',
+    dockSide: settings.floatingDockSide === 'left' ? 'left' : 'right',
     menuSide: floatingMenuSide,
     accumulation: getAccumulationState(),
-    lastCapture: getLastCaptureState()
+    lastCapture: getLastCaptureState(),
+    floatingIconOpacity,
+    floatingIconCustomPath: customPath,
+    floatingIconCustomUrl: customIconUrl
   });
 }
 
@@ -2024,6 +2028,18 @@ function setupIpc() {
     return { ok };
   });
 
+  ipcMain.handle('delete-records', async (_, ids = []) => {
+    const list = Array.isArray(ids) ? ids : [];
+    let count = 0;
+    for (const id of list) {
+      if (storage.deleteRecord(id)) {
+        count += 1;
+      }
+    }
+    sendSnapshot(count ? `已删除 ${count} 条记录` : '没有删除任何记录');
+    return { ok: true, count };
+  });
+
   ipcMain.handle('open-image-path', async (_, imagePath) => {
     if (imagePath) {
       await shell.openPath(imagePath);
@@ -2074,6 +2090,20 @@ function setupIpc() {
   ipcMain.handle('select-folder', async () => {
     const result = await dialog.showOpenDialog(mainWindow, {
       properties: ['openDirectory']
+    });
+    return {
+      canceled: result.canceled,
+      path: result.filePaths && result.filePaths[0] ? result.filePaths[0] : ''
+    };
+  });
+
+  ipcMain.handle('select-floating-icon-file', async () => {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      properties: ['openFile'],
+      filters: [
+        { name: 'Image Files', extensions: ['gif', 'png', 'jpg', 'jpeg'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
     });
     return {
       canceled: result.canceled,
@@ -2710,7 +2740,16 @@ function setupIpc() {
     dockSide: getSettings().floatingDockSide === 'left' ? 'left' : 'right',
     menuSide: floatingMenuSide,
     accumulation: getAccumulationState(),
-    lastCapture: getLastCaptureState()
+    lastCapture: getLastCaptureState(),
+    floatingIconOpacity: (() => {
+      const value = Number(getSettings().floatingIconOpacity);
+      return Number.isFinite(value) ? Math.max(0.2, Math.min(1, value)) : 1;
+    })(),
+    floatingIconCustomPath: (() => String(getSettings().floatingIconCustomPath || '').trim())(),
+    floatingIconCustomUrl: (() => {
+      const filePath = String(getSettings().floatingIconCustomPath || '').trim();
+      return filePath && fs.existsSync(filePath) ? pathToFileURL(filePath).href : '';
+    })()
   }));
 
   ipcMain.handle('floating-quick-save', async () => quickCaptureClipboard({ category: 'daily' }));

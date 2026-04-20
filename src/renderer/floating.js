@@ -22,9 +22,23 @@ let togglePending = false;
 let clickToggleTimer = null;
 const DOUBLE_CLICK_DELAY_MS = 220;
 
+async function openMenuByHover() {
+  if (menuOpen || dragging || startPoint) return;
+  if (togglePending) return;
+  togglePending = true;
+  try {
+    await window.deskLibraryFloating.toggleMenu();
+  } finally {
+    setTimeout(() => {
+      togglePending = false;
+    }, 120);
+  }
+}
+
 function renderMenuState(payload = {}) {
   menuOpen = !!payload.open;
   menu.classList.toggle('hidden', !menuOpen);
+  shell.classList.toggle('menu-open', menuOpen);
   shell.dataset.side = payload.menuSide === 'left' ? 'left' : 'right';
   accumulation = payload.accumulation || accumulation;
   lastCapture = payload.lastCapture || lastCapture;
@@ -41,20 +55,38 @@ function renderMenuState(payload = {}) {
   button.title = active ? `累计复制中，已收集 ${accumulation.count || 0} 段` : '快捷菜单';
 
   const finishDesc = accumulation.finishShortcutLabel
-    ? `按 ${accumulation.finishShortcutLabel} 结束累计`
-    : '结束当前累计复制并保留卡片';
+    ? `结束累计（${accumulation.finishShortcutLabel}）`
+    : '结束累计';
   const cancelDesc = accumulation.cancelShortcutLabel
-    ? `按 ${accumulation.cancelShortcutLabel} 取消累计`
-    : '退出累计复制，保留当前已保存内容';
+    ? `取消累计（${accumulation.cancelShortcutLabel}）`
+    : '取消累计';
   const deleteDesc = lastCapture.available
-    ? `${lastCapture.preview || '最近收藏'}${lastCapture.shortcutLabel ? ` · ${lastCapture.shortcutLabel}` : ''}`
+    ? `删除上次收藏：${lastCapture.preview || '最近收藏'}`
     : '暂无可删除的最近收藏';
 
-  finishAccumulationBtn.querySelector('.menu-desc').textContent = finishDesc;
-  cancelAccumulationBtn.querySelector('.menu-desc').textContent = cancelDesc;
-  deleteLastCaptureBtn.querySelector('.menu-desc').textContent = deleteDesc;
+  finishAccumulationBtn.dataset.tip = finishDesc;
+  cancelAccumulationBtn.dataset.tip = cancelDesc;
+  deleteLastCaptureBtn.dataset.tip = deleteDesc;
   deleteLastCaptureBtn.disabled = !lastCapture.available;
-  button.textContent = active ? `累计\n${accumulation.count || 0}` : 'C';
+  const opacity = Number(payload.floatingIconOpacity);
+  const clampedOpacity = Number.isFinite(opacity) ? Math.max(0.2, Math.min(1, opacity)) : 1;
+  button.style.opacity = String(clampedOpacity);
+  const customUrl = String(payload.floatingIconCustomUrl || '').trim();
+  if (!active && customUrl) {
+    button.textContent = '';
+    button.style.backgroundImage = `url("${customUrl.replace(/"/g, '%22')}")`;
+    button.style.backgroundSize = 'cover';
+    button.style.backgroundPosition = 'center';
+    button.style.backgroundRepeat = 'no-repeat';
+    button.style.backgroundColor = 'transparent';
+  } else {
+    button.textContent = active ? `累计\n${accumulation.count || 0}` : 'D';
+    button.style.backgroundImage = '';
+    button.style.backgroundSize = '';
+    button.style.backgroundPosition = '';
+    button.style.backgroundRepeat = '';
+    button.style.backgroundColor = '';
+  }
 }
 
 button.addEventListener('mousedown', (event) => {
@@ -131,6 +163,15 @@ button.addEventListener('dblclick', async (event) => {
     clickToggleTimer = null;
   }
   await window.deskLibraryFloating.openMainWindow();
+  await window.deskLibraryFloating.closeMenu();
+});
+
+button.addEventListener('mouseenter', async () => {
+  await openMenuByHover();
+});
+
+shell.addEventListener('mouseleave', async () => {
+  if (!menuOpen || dragging || startPoint) return;
   await window.deskLibraryFloating.closeMenu();
 });
 

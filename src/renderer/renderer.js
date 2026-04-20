@@ -14,6 +14,8 @@ const state = {
   currentPageNumber: 1,
   pageSize: 12,
   selectedRecordId: null,
+  recordSelection: {},
+  recordMultiSelectMode: false,
   selectedAssetId: null,
   selectedBrowserCardId: null,
   assetSearchKeyword: '',
@@ -97,8 +99,24 @@ const els = {
   filterCard: document.querySelector('.filter-card'),
   dailyFilterBar: document.getElementById('dailyFilterBar'),
   recordsList: document.getElementById('recordsList'),
+  dailyBulkbar: document.getElementById('dailyBulkbar'),
+  dailySelectedCount: document.getElementById('dailySelectedCount'),
+  dailyEnterMultiSelectBtn: document.getElementById('dailyEnterMultiSelectBtn'),
+  dailyToggleMultiSelectBtn: document.getElementById('dailyToggleMultiSelectBtn'),
+  dailySelectAllBtn: document.getElementById('dailySelectAllBtn'),
+  dailyClearSelectionBtn: document.getElementById('dailyClearSelectionBtn'),
+  dailyDeleteSelectedBtn: document.getElementById('dailyDeleteSelectedBtn'),
+  dailyMultiEntry: document.getElementById('dailyMultiEntry'),
   dailyPagination: document.getElementById('dailyPagination'),
   commonRecordsList: document.getElementById('commonRecordsList'),
+  commonBulkbar: document.getElementById('commonBulkbar'),
+  commonSelectedCount: document.getElementById('commonSelectedCount'),
+  commonEnterMultiSelectBtn: document.getElementById('commonEnterMultiSelectBtn'),
+  commonToggleMultiSelectBtn: document.getElementById('commonToggleMultiSelectBtn'),
+  commonSelectAllBtn: document.getElementById('commonSelectAllBtn'),
+  commonClearSelectionBtn: document.getElementById('commonClearSelectionBtn'),
+  commonDeleteSelectedBtn: document.getElementById('commonDeleteSelectedBtn'),
+  commonMultiEntry: document.getElementById('commonMultiEntry'),
   topDailyList: document.getElementById('topDailyList'),
   recentDailyList: document.getElementById('recentDailyList'),
   dailyCount: document.getElementById('dailyCount'),
@@ -155,6 +173,11 @@ const els = {
   copyThenKeyEnabled: document.getElementById('copyThenKeyEnabled'),
   startupLaunchEnabled: document.getElementById('startupLaunchEnabled'),
   floatingIconEnabled: document.getElementById('floatingIconEnabled'),
+  floatingIconOpacityRange: document.getElementById('floatingIconOpacityRange'),
+  floatingIconOpacityLabel: document.getElementById('floatingIconOpacityLabel'),
+  floatingIconCustomPathInput: document.getElementById('floatingIconCustomPathInput'),
+  selectFloatingIconBtn: document.getElementById('selectFloatingIconBtn'),
+  clearFloatingIconBtn: document.getElementById('clearFloatingIconBtn'),
   dockToEdgeEnabled: document.getElementById('dockToEdgeEnabled'),
   postCopyKey: document.getElementById('postCopyKey'),
   deleteLastCaptureShortcutInput: document.getElementById('deleteLastCaptureShortcutInput'),
@@ -367,6 +390,26 @@ function recordsForCurrentPage() {
   return dailyRecords();
 }
 
+function currentRecordListForView() {
+  return state.currentPage === 'common' ? commonRecords() : dailyRecords();
+}
+
+function selectedRecordIdsForCurrentView() {
+  const ids = new Set(currentRecordListForView().map((item) => item.id));
+  return Object.keys(state.recordSelection)
+    .filter((id) => state.recordSelection[id] && ids.has(Number(id)))
+    .map((id) => Number(id));
+}
+
+function clearRecordSelectionCurrentView() {
+  const ids = new Set(currentRecordListForView().map((item) => item.id));
+  Object.keys(state.recordSelection).forEach((id) => {
+    if (ids.has(Number(id))) {
+      delete state.recordSelection[id];
+    }
+  });
+}
+
 function assetsForCurrentPage() {
   let assets = [...state.assets];
   if (state.assetTypeFilter !== '全部') {
@@ -463,6 +506,7 @@ function render() {
     els.browserCardSearchInput.value = state.browserCardSearchKeyword;
   }
   renderPage();
+  renderRecordBulkbars();
   renderMobileTools();
   renderSearchTools();
   renderFilters();
@@ -683,6 +727,24 @@ function renderPage() {
   }
 }
 
+function renderRecordBulkbars() {
+  const isDaily = state.currentPage === 'daily';
+  const isCommon = state.currentPage === 'common';
+  const selectedCount = selectedRecordIdsForCurrentView().length;
+
+  els.dailyBulkbar?.classList.toggle('hidden', !(isDaily && state.recordMultiSelectMode));
+  els.dailyMultiEntry?.classList.toggle('hidden', !isDaily || state.recordMultiSelectMode);
+  if (els.dailySelectedCount) {
+    els.dailySelectedCount.textContent = String(isDaily ? selectedCount : 0);
+  }
+
+  els.commonBulkbar?.classList.toggle('hidden', !(isCommon && state.recordMultiSelectMode));
+  els.commonMultiEntry?.classList.toggle('hidden', !isCommon || state.recordMultiSelectMode);
+  if (els.commonSelectedCount) {
+    els.commonSelectedCount.textContent = String(isCommon ? selectedCount : 0);
+  }
+}
+
 function renderFilters() {
   els.dailyFilterBar.innerHTML = '';
   if (state.currentPage !== 'daily') return;
@@ -729,7 +791,7 @@ function renderAssetFilters() {
   });
 }
 
-function buildRecordCard(record) {
+function buildRecordCard(record, multiSelectMode = false, selected = false) {
   const thumb = record.contentType === 'image' && record.imageDataUrl
     ? `<div class="thumb-wrap"><img src="${record.imageDataUrl}" alt="缩略图" /></div>`
     : '';
@@ -741,6 +803,7 @@ function buildRecordCard(record) {
   return `
     <div class="record-card-actions">
       <div class="record-topline">${escapeHtml(record.categoryDisplay)} · ${escapeHtml(record.contentTypeDisplay)} · ${escapeHtml(sourceLabel)}</div>
+      ${multiSelectMode ? `<input class="record-select-toggle" type="checkbox" data-record-select="${record.id}"${selected ? ' checked' : ''} />` : ''}
       <button class="card-copy-btn" data-record-id="${record.id}" title="复制">⧉</button>
     </div>
     <div class="record-title">${escapeHtml(record.displayTitle)}</div>
@@ -895,22 +958,41 @@ function buildBrowserCard(card) {
 
 function renderRecordList(container, records) {
   container.innerHTML = '';
+  const multiSelectMode = !!state.recordMultiSelectMode;
   records.forEach((record) => {
+    const selected = !!state.recordSelection[record.id];
     const item = document.createElement('article');
-    item.className = `record-item ${record.contentType === 'image' ? 'is-image' : 'is-text'} ${record.id === state.selectedRecordId ? 'active' : ''}`;
+    item.className = `record-item ${record.contentType === 'image' ? 'is-image' : 'is-text'} ${record.id === state.selectedRecordId ? 'active' : ''} ${selected ? 'selected' : ''}`;
     item.tabIndex = 0;
-    item.innerHTML = buildRecordCard(record);
+    item.innerHTML = buildRecordCard(record, multiSelectMode, selected);
     item.onclick = () => {
+      if (multiSelectMode) {
+        state.recordSelection[record.id] = !state.recordSelection[record.id];
+        render();
+        return;
+      }
       state.selectedRecordId = record.id;
       openModal();
     };
     item.onkeydown = (event) => {
       if (event.key === 'Enter' || event.key === ' ') {
         event.preventDefault();
+        if (multiSelectMode) {
+          state.recordSelection[record.id] = !state.recordSelection[record.id];
+          render();
+          return;
+        }
         state.selectedRecordId = record.id;
         openModal();
       }
     };
+    const selectToggle = item.querySelector('[data-record-select]');
+    selectToggle?.addEventListener('click', (event) => {
+      event.stopPropagation();
+      state.recordSelection[record.id] = !!event.target.checked;
+      renderRecordBulkbars();
+      item.classList.toggle('selected', !!state.recordSelection[record.id]);
+    });
     const copyButton = item.querySelector('.card-copy-btn');
     if (copyButton) {
       copyButton.addEventListener('click', async (event) => {
@@ -1778,6 +1860,18 @@ function renderSettings() {
   els.copyThenKeyEnabled.checked = !!s.copyThenKeyEnabled;
   els.startupLaunchEnabled.checked = !!s.startupLaunchEnabled;
   els.floatingIconEnabled.checked = !!s.floatingIconEnabled;
+  if (els.floatingIconOpacityRange) {
+    const opacity = Number(s.floatingIconOpacity);
+    const clamped = Number.isFinite(opacity) ? Math.max(0.2, Math.min(1, opacity)) : 1;
+    const percent = Math.round(clamped * 100);
+    els.floatingIconOpacityRange.value = String(percent);
+    if (els.floatingIconOpacityLabel) {
+      els.floatingIconOpacityLabel.textContent = `${percent}%`;
+    }
+  }
+  if (els.floatingIconCustomPathInput) {
+    els.floatingIconCustomPathInput.value = String(s.floatingIconCustomPath || '').trim();
+  }
   els.dockToEdgeEnabled.checked = s.dockToEdgeEnabled !== false;
   els.postCopyKey.value = s.postCopyKey || 'Shift';
   if (els.deleteLastCaptureShortcutInput) {
@@ -2061,6 +2155,10 @@ function applySnapshot(payload) {
     || '';
   state.statusText = payload.statusText || '后台监听中';
   const cardIds = new Set(state.browserCards.map((item) => item.id));
+  const recordIds = new Set(state.records.map((item) => item.id));
+  state.recordSelection = Object.fromEntries(
+    Object.entries(state.recordSelection).filter(([id, value]) => value && recordIds.has(Number(id)))
+  );
   state.browserCardSelection = Object.fromEntries(
     Object.entries(state.browserCardSelection).filter(([id, value]) => value && cardIds.has(id))
   );
@@ -2095,6 +2193,12 @@ function collectSettings() {
     copyThenKeyEnabled: els.copyThenKeyEnabled.checked,
     startupLaunchEnabled: els.startupLaunchEnabled.checked,
     floatingIconEnabled: els.floatingIconEnabled.checked,
+    floatingIconOpacity: (() => {
+      const raw = Number(els.floatingIconOpacityRange?.value || 100);
+      const percent = Number.isFinite(raw) ? Math.max(20, Math.min(100, raw)) : 100;
+      return percent / 100;
+    })(),
+    floatingIconCustomPath: (els.floatingIconCustomPathInput?.value || '').trim(),
     dockToEdgeEnabled: els.dockToEdgeEnabled.checked,
     postCopyKey: els.postCopyKey.value.trim() || 'Shift',
     deleteLastCaptureShortcut: (els.deleteLastCaptureShortcutInput?.value || '').trim(),
@@ -2116,10 +2220,49 @@ function collectSettings() {
 
 function switchPage(page) {
   state.currentPage = page;
+  if (!(page === 'daily' || page === 'common')) {
+    state.recordMultiSelectMode = false;
+  }
   ensureValidSelection();
   ensureValidAssetSelection();
   ensureValidBrowserCardSelection();
   render();
+}
+
+function setRecordMultiSelectMode(enabled) {
+  state.recordMultiSelectMode = !!enabled;
+  if (!state.recordMultiSelectMode) {
+    clearRecordSelectionCurrentView();
+  }
+  render();
+}
+
+function selectAllRecordsCurrentView() {
+  currentRecordListForView().forEach((item) => {
+    state.recordSelection[item.id] = true;
+  });
+  render();
+}
+
+async function deleteSelectedRecordsCurrentView() {
+  const ids = selectedRecordIdsForCurrentView();
+  if (!ids.length) {
+    alert('请先选择要删除的记录');
+    return;
+  }
+  if (!window.confirm(`确认删除选中的 ${ids.length} 条记录吗？删除后无法恢复。`)) {
+    return;
+  }
+  const result = await window.deskLibrary.deleteRecords(ids);
+  if (result && result.ok === false) {
+    alert(result.message || '批量删除失败');
+    return;
+  }
+  ids.forEach((id) => {
+    delete state.recordSelection[id];
+  });
+  state.recordMultiSelectMode = false;
+  applySnapshot(await window.deskLibrary.getInitialData());
 }
 
 async function importAssetPaths(paths, mode) {
@@ -2463,6 +2606,26 @@ els.mobileAssetsNavBtn?.addEventListener('click', () => switchPage('assets'));
 els.mobileBrowserCardsNavBtn?.addEventListener('click', () => switchPage('browserCards'));
 els.mobileSettingsNavBtn?.addEventListener('click', () => switchPage('settings'));
 els.mobileAboutNavBtn?.addEventListener('click', () => switchPage('about'));
+els.dailyEnterMultiSelectBtn?.addEventListener('click', () => setRecordMultiSelectMode(true));
+els.dailyToggleMultiSelectBtn?.addEventListener('click', () => setRecordMultiSelectMode(false));
+els.dailySelectAllBtn?.addEventListener('click', () => selectAllRecordsCurrentView());
+els.dailyClearSelectionBtn?.addEventListener('click', () => {
+  clearRecordSelectionCurrentView();
+  render();
+});
+els.dailyDeleteSelectedBtn?.addEventListener('click', async () => {
+  await deleteSelectedRecordsCurrentView();
+});
+els.commonEnterMultiSelectBtn?.addEventListener('click', () => setRecordMultiSelectMode(true));
+els.commonToggleMultiSelectBtn?.addEventListener('click', () => setRecordMultiSelectMode(false));
+els.commonSelectAllBtn?.addEventListener('click', () => selectAllRecordsCurrentView());
+els.commonClearSelectionBtn?.addEventListener('click', () => {
+  clearRecordSelectionCurrentView();
+  render();
+});
+els.commonDeleteSelectedBtn?.addEventListener('click', async () => {
+  await deleteSelectedRecordsCurrentView();
+});
 els.windowMinBtn.addEventListener('click', () => window.deskLibrary.minimizeWindow());
 els.windowMaxBtn.addEventListener('click', async () => {
   const result = await window.deskLibrary.toggleMaximizeWindow();
@@ -2812,6 +2975,27 @@ els.selectSelfBuiltWorkspaceDirBtn?.addEventListener('click', async () => {
   const result = await window.deskLibrary.selectFolder();
   if (result && !result.canceled && result.path) {
     els.selfBuiltWorkspaceDirInput.value = result.path;
+  }
+});
+
+els.floatingIconOpacityRange?.addEventListener('input', () => {
+  const raw = Number(els.floatingIconOpacityRange?.value || 100);
+  const percent = Number.isFinite(raw) ? Math.max(20, Math.min(100, raw)) : 100;
+  if (els.floatingIconOpacityLabel) {
+    els.floatingIconOpacityLabel.textContent = `${percent}%`;
+  }
+});
+
+els.selectFloatingIconBtn?.addEventListener('click', async () => {
+  const result = await window.deskLibrary.selectFloatingIconFile();
+  if (result && !result.canceled && result.path && els.floatingIconCustomPathInput) {
+    els.floatingIconCustomPathInput.value = result.path;
+  }
+});
+
+els.clearFloatingIconBtn?.addEventListener('click', () => {
+  if (els.floatingIconCustomPathInput) {
+    els.floatingIconCustomPathInput.value = '';
   }
 });
 

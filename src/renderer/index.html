@@ -127,6 +127,21 @@
                 <textarea id="newRecordDraft" rows="2" placeholder="快速记一条备忘、命令或片段..." spellcheck="false"></textarea>
                 <button id="createRecordBtn" class="icon-action primary" title="新增">＋</button>
               </section>
+              <section id="dailyBulkbar" class="record-bulkbar hidden">
+                <div class="record-bulkbar-info">
+                  <span>已选中</span>
+                  <strong id="dailySelectedCount">0</strong>
+                </div>
+                <div class="record-bulkbar-actions">
+                  <button id="dailyToggleMultiSelectBtn" class="text-action" type="button">退出多选</button>
+                  <button id="dailySelectAllBtn" class="text-action" type="button">全选本页</button>
+                  <button id="dailyClearSelectionBtn" class="text-action" type="button">清空</button>
+                  <button id="dailyDeleteSelectedBtn" class="text-action danger" type="button">删除选中</button>
+                </div>
+              </section>
+              <section id="dailyMultiEntry" class="section-head compact">
+                <button id="dailyEnterMultiSelectBtn" class="text-action" type="button">多选/全选删除</button>
+              </section>
 
               <section class="section-head compact">
                 <span>每日内容</span>
@@ -138,6 +153,21 @@
 
             <section id="commonPage" class="page-view page-scroll hidden">
               <section class="panel minimalist-panel">
+                <section id="commonBulkbar" class="record-bulkbar hidden">
+                  <div class="record-bulkbar-info">
+                    <span>已选中</span>
+                    <strong id="commonSelectedCount">0</strong>
+                  </div>
+                  <div class="record-bulkbar-actions">
+                    <button id="commonToggleMultiSelectBtn" class="text-action" type="button">退出多选</button>
+                    <button id="commonSelectAllBtn" class="text-action" type="button">全选当前</button>
+                    <button id="commonClearSelectionBtn" class="text-action" type="button">清空</button>
+                    <button id="commonDeleteSelectedBtn" class="text-action danger" type="button">删除选中</button>
+                  </div>
+                </section>
+                <section id="commonMultiEntry" class="section-head compact">
+                  <button id="commonEnterMultiSelectBtn" class="text-action" type="button">多选/全选删除</button>
+                </section>
                 <div class="section-head">
                   <span>常用</span>
                   <span id="commonCount" class="count-chip">0</span>
@@ -305,6 +335,21 @@
                   </div>
                   <label class="setting-row"><span>开机启动</span><input id="startupLaunchEnabled" type="checkbox" /></label>
                   <label class="setting-row"><span>悬浮图标</span><input id="floatingIconEnabled" type="checkbox" /></label>
+                  <div class="settings-key-row">
+                    <span>图标透明度</span>
+                    <div class="setting-opacity-group">
+                      <input id="floatingIconOpacityRange" type="range" min="20" max="100" step="1" />
+                      <span id="floatingIconOpacityLabel" class="setting-opacity-label">100%</span>
+                    </div>
+                  </div>
+                  <div class="settings-key-row">
+                    <span>自定义图标</span>
+                    <div class="setting-path-input-group">
+                      <input id="floatingIconCustomPathInput" type="text" placeholder="支持 gif / png / jpg" readonly />
+                      <button id="selectFloatingIconBtn" class="text-action compact" type="button">选择</button>
+                      <button id="clearFloatingIconBtn" class="text-action compact" type="button">清空</button>
+                    </div>
+                  </div>
                   <label class="setting-row"><span>靠边显示</span><input id="dockToEdgeEnabled" type="checkbox" /></label>
                 </div>
 

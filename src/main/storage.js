@@ -35,8 +35,8 @@ class StorageService {
     this.ensureFile(this.assetsFile, []);
     this.ensureFile(this.browserCardsFile, []);
     this.ensureFile(this.settingsFile, {
-      autoJudgmentEnabled: true,
-      doubleCopyEnabled: true,
+      autoJudgmentEnabled: false,
+      doubleCopyEnabled: false,
       copyThenKeyEnabled: true,
       postCopyKey: 'Shift',
       hotkeyDeleteLastEnabled: true,
@@ -50,6 +50,8 @@ class StorageService {
       deleteLastCaptureShortcut: 'Ctrl+Alt+Z',
       startupLaunchEnabled: true,
       floatingIconEnabled: true,
+      floatingIconOpacity: 1,
+      floatingIconCustomPath: '',
       dockToEdgeEnabled: true,
       floatingOffsetX: null,
       floatingDockSide: 'right',
@@ -206,8 +208,8 @@ class StorageService {
     const derivedChromePath = selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chrome.exe') : '';
 
     return {
-      autoJudgmentEnabled: true,
-      doubleCopyEnabled: true,
+      autoJudgmentEnabled: false,
+      doubleCopyEnabled: false,
       copyThenKeyEnabled: true,
       postCopyKey: 'Shift',
       hotkeyDeleteLastEnabled: true,
@@ -221,6 +223,8 @@ class StorageService {
       deleteLastCaptureShortcut: 'Ctrl+Alt+Z',
       startupLaunchEnabled: true,
       floatingIconEnabled: true,
+      floatingIconOpacity: 1,
+      floatingIconCustomPath: '',
       dockToEdgeEnabled: true,
       floatingOffsetX: null,
       floatingDockSide: 'right',
