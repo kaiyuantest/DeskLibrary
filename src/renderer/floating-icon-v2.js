@@ -15,6 +15,7 @@ let dragReady = false;
 let startDragInFlight = false;
 let pendingDragPoint = null;
 let dragMoveRaf = 0;
+let dragSessionId = 0;
 let clickTimer = null;
 let hoverOpenTimer = null;
 let lastClickAt = 0;
@@ -105,6 +106,7 @@ button.addEventListener('pointerdown', (event) => {
   dragging = false;
   moved = false;
   activePointerId = event.pointerId;
+  dragSessionId += 1;
   button.setPointerCapture(event.pointerId);
   pointerStart = { x: event.screenX, y: event.screenY };
   dragOffset = {
@@ -128,14 +130,23 @@ button.addEventListener('pointermove', (event) => {
   if (!dragging && passedThreshold) {
     dragging = true;
     startDragInFlight = true;
+    const sessionId = dragSessionId;
     window.deskLibraryFloating.startDrag({
       offsetX: dragOffset?.offsetX || 0,
       offsetY: dragOffset?.offsetY || 0
     }).then(() => {
+      if (sessionId !== dragSessionId || activePointerId === null || !dragging) {
+        startDragInFlight = false;
+        dragReady = false;
+        return;
+      }
       startDragInFlight = false;
       dragReady = true;
       queueDragMove();
     }).catch(() => {
+      if (sessionId !== dragSessionId) {
+        return;
+      }
       startDragInFlight = false;
       dragReady = false;
       dragging = false;
@@ -164,6 +175,7 @@ button.addEventListener('pointerup', async (event) => {
   }
   button.releasePointerCapture(event.pointerId);
   activePointerId = null;
+  dragSessionId += 1;
   pointerStart = null;
   dragOffset = null;
 });
@@ -185,6 +197,7 @@ button.addEventListener('pointercancel', async (event) => {
     button.releasePointerCapture(event.pointerId);
   } catch {}
   activePointerId = null;
+  dragSessionId += 1;
   pointerStart = null;
   dragOffset = null;
 });
@@ -206,6 +219,7 @@ window.addEventListener('blur', async () => {
     } catch {}
   }
   activePointerId = null;
+  dragSessionId += 1;
   pointerStart = null;
   dragOffset = null;
 });

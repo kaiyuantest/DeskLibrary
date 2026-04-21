@@ -19,6 +19,7 @@ class FloatingCircleMenu {
     };
 
     this.ringLayers = [];
+    this.viewportCenter = null;
     this.lastCenterTap = 0;
     this.msgTimer = null;
     this.expandingGuard = '';
@@ -229,8 +230,7 @@ class FloatingCircleMenu {
       return;
     }
     const gIdx = firstLevel.findIndex((item) => item.id === groupId);
-    const start = -Math.PI / 2;
-    const gAngle = start + ((Math.PI * 2) * gIdx) / firstLevel.length;
+    const gAngle = this.getDepth0Angle(gIdx, firstLevel.length);
     const groupAnchor = {
       x: Math.cos(gAngle) * this.getLayerRadius(0),
       y: Math.sin(gAngle) * this.getLayerRadius(0)
@@ -373,6 +373,12 @@ class FloatingCircleMenu {
     if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) {
       this.root.style.left = '50%';
       this.root.style.top = '50%';
+      this.viewportCenter = {
+        x: Math.round(width / 2),
+        y: Math.round(height / 2),
+        width,
+        height
+      };
       return;
     }
     const margin = 28;
@@ -380,6 +386,36 @@ class FloatingCircleMenu {
     const y = Math.max(margin, Math.min(height - margin, Math.round(Number(point.y))));
     this.root.style.left = `${x}px`;
     this.root.style.top = `${y}px`;
+    this.viewportCenter = { x, y, width, height };
+  }
+
+  getDepth0Layout() {
+    const radius = this.getLayerRadius(0);
+    const orbRadius = this.getOrbVisualRadius();
+    const center = this.viewportCenter || {
+      x: Math.round((window.innerWidth || 1) / 2),
+      y: Math.round((window.innerHeight || 1) / 2),
+      width: Math.max(1, Math.round(window.innerWidth || 1)),
+      height: Math.max(1, Math.round(window.innerHeight || 1))
+    };
+    const edgeThreshold = radius + orbRadius + 22;
+    if (center.x <= edgeThreshold) {
+      return { start: -Math.PI / 2, spread: Math.PI };
+    }
+    if (center.x >= center.width - edgeThreshold) {
+      return { start: Math.PI / 2, spread: Math.PI };
+    }
+    return { start: -Math.PI / 2, spread: Math.PI * 2 };
+  }
+
+  getDepth0Angle(index, count) {
+    const total = Math.max(1, Number(count) || 1);
+    const i = Math.max(0, Math.min(total - 1, Number(index) || 0));
+    const layout = this.getDepth0Layout();
+    if (total === 1) {
+      return layout.start + (layout.spread / 2);
+    }
+    return layout.start + ((layout.spread * i) / (total - 1));
   }
 
   renderLayer(depth, nodes) {
@@ -390,7 +426,6 @@ class FloatingCircleMenu {
 
     const visibleNodes = this.limitLayerNodes(nodes, depth);
     const radius = this.getLayerRadius(depth);
-    const start = -Math.PI / 2;
     const selected = this.state.activePath[depth];
     const anchor = this.state.layerAnchors[depth] || { x: 0, y: 0 };
     const outwardAngle = Math.atan2(anchor.y, anchor.x);
@@ -398,7 +433,7 @@ class FloatingCircleMenu {
 
     visibleNodes.forEach((item, idx) => {
       const angle = depth === 0
-        ? (start + ((Math.PI * 2) * idx) / visibleNodes.length)
+        ? this.getDepth0Angle(idx, visibleNodes.length)
         : (outwardAngle - (spread / 2) + ((visibleNodes.length === 1 ? 0 : spread / (visibleNodes.length - 1)) * idx));
       const x = anchor.x + (Math.cos(angle) * radius);
       const y = anchor.y + (Math.sin(angle) * radius);

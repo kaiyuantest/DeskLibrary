@@ -22,7 +22,7 @@ const COPY_SHORTCUT_MAX_RETRIES = 15;
 const SHORTCUT_POLL_SUPPRESS_MS = 1000;
 const FLOATING_WINDOW_SIZE = 48;
 const FLOATING_WINDOW_MARGIN = 6;
-const FLOATING_VISIBLE_SLIVER = 16;
+const FLOATING_VISIBLE_SLIVER = 24;
 const FLOATING_SLIDE_STEP = 8;
 const FLOATING_SLIDE_INTERVAL_MS = 10;
 const FLOATING_HIDE_DELAY_MS = 180;
@@ -43,7 +43,7 @@ const MAIN_WINDOW_SLIDE_INTERVAL_MS = 10;
 const MAIN_WINDOW_HIDE_DELAY_MS = 220;
 const MAIN_WINDOW_DRAG_SUSPEND_MS = 320;
 const HOVER_SYNC_INTERVAL_MS = 120;
-const FLOATING_MENU_AUTO_CLOSE_GUARD_MS = 120;
+const FLOATING_MENU_AUTO_CLOSE_GUARD_MS = 260;
 const ACTIVE_WINDOW_HELPER_PATH = path.join(__dirname, 'bin', 'ActiveWindowInfo.exe');
 
 let mainWindow = null;
@@ -79,6 +79,8 @@ let floatingHideTimer = null;
 let floatingMenuOpen = false;
 let floatingMenuSide = 'right';
 let floatingMenuOpenedAt = 0;
+let floatingMenuBlurCloseTimer = null;
+let floatingHasEverBeenShown = false;
 let accumulationSession = null;
 let mainWindowHovered = false;
 let mainWindowSlideTimer = null;
@@ -689,9 +691,20 @@ function createWindow() {
 
 function getFloatingAnchorBounds(mode = 'hidden') {
   const settings = getSettings();
-  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const referenceBounds = (() => {
+    if (floatingWindow && !floatingWindow.isDestroyed()) {
+      return getFloatingWindowBounds() || floatingWindow.getBounds();
+    }
+    if (floatingAnchorBoundsCache) {
+      return floatingAnchorBoundsCache;
+    }
+    return screen.getPrimaryDisplay().workArea;
+  })();
+  const display = screen.getDisplayMatching(referenceBounds);
   const workArea = display.workArea;
-  const side = settings.floatingDockSide === 'left' ? 'left' : 'right';
+  const dockSideRaw = String(settings.floatingDockSide || '').trim().toLowerCase();
+  const hasDockSide = dockSideRaw === 'left' || dockSideRaw === 'right';
+  const side = hasDockSide ? dockSideRaw : 'right';
   const offsetX = Number.isFinite(settings.floatingOffsetX) ? settings.floatingOffsetX : null;
   const offsetY = Number.isFinite(settings.floatingOffsetY) ? settings.floatingOffsetY : null;
   const maxX = workArea.x + workArea.width - FLOATING_WINDOW_SIZE - FLOATING_WINDOW_MARGIN;
@@ -702,7 +715,7 @@ function getFloatingAnchorBounds(mode = 'hidden') {
   const y = Math.min(maxY, Math.max(workArea.y + FLOATING_WINDOW_MARGIN, offsetY === null ? fallbackY : workArea.y + offsetY));
 
   let x = Math.min(maxX, Math.max(workArea.x + FLOATING_WINDOW_MARGIN, offsetX === null ? maxX : workArea.x + offsetX));
-  if (settings.dockToEdgeEnabled) {
+  if (settings.dockToEdgeEnabled && hasDockSide) {
     if (side === 'left') {
       x = mode === 'visible'
         ? workArea.x + FLOATING_WINDOW_MARGIN
@@ -725,7 +738,10 @@ function getFloatingAnchorBounds(mode = 'hidden') {
 }
 
 function getFloatingBounds(mode = 'hidden', expanded = floatingMenuOpen) {
-  const anchor = floatingAnchorBoundsCache || getFloatingAnchorBounds(mode);
+  const shouldUseCachedAnchor = !!expanded;
+  const anchor = shouldUseCachedAnchor
+    ? (floatingAnchorBoundsCache || getFloatingAnchorBounds(mode))
+    : getFloatingAnchorBounds(mode);
   const display = screen.getDisplayMatching(anchor);
   const workArea = display.workArea;
   const side = anchor.side || (getSettings().floatingDockSide === 'left' ? 'left' : 'right');
@@ -758,7 +774,14 @@ function getFloatingBounds(mode = 'hidden', expanded = floatingMenuOpen) {
     floatingMenuSide = side === 'left' ? 'left' : 'right';
   } else {
     floatingMenuSide = side === 'left' ? 'left' : 'right';
-    x = Math.max(workArea.x, Math.min(x, maxX));
+    const settings = getSettings();
+    const dockSideRaw = String(settings.floatingDockSide || '').trim().toLowerCase();
+    const hasDockSide = dockSideRaw === 'left' || dockSideRaw === 'right';
+    const dockEnabled = settings.dockToEdgeEnabled;
+    const allowHiddenOutsideWorkArea = dockEnabled && hasDockSide && mode === 'hidden';
+    if (!allowHiddenOutsideWorkArea) {
+      x = Math.max(workArea.x, Math.min(x, maxX));
+    }
     y = Math.max(workArea.y, Math.min(y, maxY));
   }
 
@@ -785,6 +808,13 @@ function clearFloatingHideTimer() {
   if (floatingHideTimer) {
     clearTimeout(floatingHideTimer);
     floatingHideTimer = null;
+  }
+}
+
+function clearFloatingMenuBlurCloseTimer() {
+  if (floatingMenuBlurCloseTimer) {
+    clearTimeout(floatingMenuBlurCloseTimer);
+    floatingMenuBlurCloseTimer = null;
   }
 }
 
@@ -956,6 +986,17 @@ function getCurrentFloatingAnchorBounds() {
   };
 }
 
+function isCursorInsideFloatingUi() {
+  const cursor = screen.getCursorScreenPoint();
+  const iconBounds = floatingWindow && !floatingWindow.isDestroyed()
+    ? (getFloatingWindowBounds() || floatingWindow.getBounds())
+    : null;
+  const menuBounds = floatingMenuWindow && !floatingMenuWindow.isDestroyed() && floatingMenuWindow.isVisible()
+    ? floatingMenuWindow.getBounds()
+    : null;
+  return isPointInsideBounds(cursor, iconBounds) || isPointInsideCircleBounds(cursor, menuBounds, 3);
+}
+
 function getStableFloatingAnchorForMenuOpen() {
   if (!floatingWindow || floatingWindow.isDestroyed()) {
     return floatingAnchorBoundsCache || getFloatingAnchorBounds('hidden');
@@ -1058,7 +1099,13 @@ function createFloatingMenuWindow() {
   });
   floatingMenuWindow.on('blur', () => {
     if (!floatingMenuOpen || floatingDragState) return;
-    closeFloatingMenu('auto');
+    clearFloatingMenuBlurCloseTimer();
+    floatingMenuBlurCloseTimer = setTimeout(() => {
+      floatingMenuBlurCloseTimer = null;
+      if (!floatingMenuOpen || floatingDragState) return;
+      if (isCursorInsideFloatingUi()) return;
+      closeFloatingMenu('auto');
+    }, 90);
   });
 }
 
@@ -1082,6 +1129,7 @@ function openFloatingMenu(payload = null) {
     return;
   }
   stopFloatingAnimation();
+  clearFloatingMenuBlurCloseTimer();
   floatingAnchorBoundsCache = getAnchorFromMenuOpenPayload(payload) || getStableFloatingAnchorForMenuOpen();
   floatingMenuOpen = true;
   floatingMenuOpenedAt = Date.now();
@@ -1108,6 +1156,7 @@ function openFloatingMenu(payload = null) {
 
 function closeFloatingMenu(reason = 'manual') {
   if (!floatingMenuOpen) return;
+  clearFloatingMenuBlurCloseTimer();
   if (reason !== 'manual' && (Date.now() - floatingMenuOpenedAt < FLOATING_MENU_AUTO_CLOSE_GUARD_MS)) {
     return;
   }
@@ -1349,7 +1398,10 @@ function syncFloatingWindowVisibility() {
       && (settings.floatingDockSide === 'left' || settings.floatingDockSide === 'right')
       && !(accumulationSession && accumulationSession.active)
       && !floatingMenuOpen;
-    const mode = dockable && !floatingHovered && !floatingPinnedVisible ? 'hidden' : 'visible';
+    const shouldKeepVisibleForRecovery = !floatingHasEverBeenShown;
+    const mode = dockable && !floatingHovered && !floatingPinnedVisible && !shouldKeepVisibleForRecovery
+      ? 'hidden'
+      : 'visible';
     if (settings.floatingIconEnabled) {
       clearFloatingHideTimer();
       if (dockable) {
@@ -1359,10 +1411,12 @@ function syncFloatingWindowVisibility() {
       }
       if (floatingWindow.webContents && !floatingWindow.webContents.isLoading()) {
         floatingWindow.showInactive();
+        floatingHasEverBeenShown = true;
       } else {
         floatingWindow.once('ready-to-show', () => {
           if (floatingWindow && !floatingWindow.isDestroyed()) {
             floatingWindow.showInactive();
+            floatingHasEverBeenShown = true;
           }
         });
       }
@@ -1549,7 +1603,7 @@ function buildFloatingMenuPayload() {
     if (menuBounds && anchor) {
       const rawCenterX = (anchor.x + ((Number(anchor.width) || FLOATING_WINDOW_SIZE) / 2)) - menuBounds.x;
       const rawCenterY = (anchor.y + ((Number(anchor.height) || FLOATING_WINDOW_SIZE) / 2)) - menuBounds.y;
-      const margin = 28;
+      const margin = 22;
       menuCenter = {
         x: Math.max(margin, Math.min(menuBounds.width - margin, Math.round(rawCenterX))),
         y: Math.max(margin, Math.min(menuBounds.height - margin, Math.round(rawCenterY)))
@@ -1557,9 +1611,12 @@ function buildFloatingMenuPayload() {
     }
   }
 
+  const dockSideRaw = String(settings.floatingDockSide || '').trim().toLowerCase();
+  const dockSide = dockSideRaw === 'left' || dockSideRaw === 'right' ? dockSideRaw : 'free';
+
   return {
     open: floatingMenuOpen,
-    dockSide: settings.floatingDockSide === 'left' ? 'left' : 'right',
+    dockSide,
     menuSide: floatingMenuSide,
     accumulation: getAccumulationState(),
     lastCapture: getLastCaptureState(),
@@ -2583,10 +2640,12 @@ function syncHoverStateFromCursor() {
   if (!FLOATING_TEST_DISABLE_HOVER_SYNC && !floatingMenuOpen && floatingWindow && !floatingWindow.isDestroyed() && settings.floatingIconEnabled) {
     const floatingDisplay = screen.getDisplayMatching(floatingBounds);
     const floatingWorkArea = floatingDisplay.workArea;
-    const floatingSide = getSettings().floatingDockSide === 'left' ? 'left' : 'right';
+    const floatingDockSideRaw = String(getSettings().floatingDockSide || '').trim().toLowerCase();
+    const hasFloatingDockSide = floatingDockSideRaw === 'left' || floatingDockSideRaw === 'right';
+    const floatingSide = floatingDockSideRaw === 'left' ? 'left' : 'right';
     const nextFloatingHovered = !floatingDragState && (
       insideFloatingIcon
-      || (settings.dockToEdgeEnabled && isPointInsideVerticalEdgeZone(
+      || (settings.dockToEdgeEnabled && hasFloatingDockSide && isPointInsideVerticalEdgeZone(
         cursor,
         floatingWorkArea,
         floatingSide,
@@ -2617,12 +2676,6 @@ function syncHoverStateFromCursor() {
   }
 
   if (!FLOATING_TEST_DISABLE_HOVER_SYNC && floatingMenuOpen && !floatingDragState) {
-    if (floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
-      floatingMenuWindow.moveTop();
-    }
-    if (floatingWindow && !floatingWindow.isDestroyed()) {
-      floatingWindow.moveTop();
-    }
     const stillInside = insideFloatingIcon || insideFloatingMenu;
     if (stillInside) {
       clearFloatingHideTimer();
@@ -3887,16 +3940,26 @@ function setupIpc() {
     const bounds = getFloatingWindowBounds() || floatingWindow.getBounds();
     const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y });
     const workArea = display.workArea;
-    const side = bounds.x + (FLOATING_WINDOW_SIZE / 2) < workArea.x + (workArea.width / 2) ? 'left' : 'right';
+    const settings = getSettings();
+    const leftDistance = Math.abs(bounds.x - workArea.x);
+    const rightDistance = Math.abs((bounds.x + FLOATING_WINDOW_SIZE) - (workArea.x + workArea.width));
+    const nearLeftEdge = leftDistance <= FLOATING_EDGE_TRIGGER_SIZE;
+    const nearRightEdge = rightDistance <= FLOATING_EDGE_TRIGGER_SIZE;
+    const side = nearLeftEdge
+      ? 'left'
+      : nearRightEdge
+        ? 'right'
+        : 'free';
     const nextSettings = storage.saveSettings({
-      ...getSettings(),
+      ...settings,
       floatingOffsetX: Math.max(0, bounds.x - workArea.x),
       floatingDockSide: side,
       floatingOffsetY: Math.max(0, bounds.y - workArea.y)
     });
     floatingDragState = null;
     floatingPinnedVisible = false;
-    floatingHovered = false;
+    // 拖拽结束后先保持可见，交给 hover 同步逻辑按光标位置决定何时隐藏。
+    floatingHovered = true;
     clearFloatingHideTimer();
     floatingAnchorBoundsCache = {
       x: bounds.x,
@@ -3911,6 +3974,7 @@ function setupIpc() {
       floatingWindow.moveTop();
     }
     positionFloatingWindow();
+    syncHoverStateFromCursor();
     sendFloatingMenuState();
     sendSnapshot('悬浮图标位置已更新');
     return { ok: true };
