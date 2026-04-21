@@ -3941,10 +3941,15 @@ function setupIpc() {
     const display = screen.getDisplayNearestPoint({ x: bounds.x, y: bounds.y });
     const workArea = display.workArea;
     const settings = getSettings();
+    const leftHiddenX = workArea.x - FLOATING_WINDOW_SIZE + FLOATING_VISIBLE_SLIVER;
+    const rightHiddenX = workArea.x + workArea.width - FLOATING_VISIBLE_SLIVER;
     const leftDistance = Math.abs(bounds.x - workArea.x);
     const rightDistance = Math.abs((bounds.x + FLOATING_WINDOW_SIZE) - (workArea.x + workArea.width));
-    const nearLeftEdge = leftDistance <= FLOATING_EDGE_TRIGGER_SIZE;
-    const nearRightEdge = rightDistance <= FLOATING_EDGE_TRIGGER_SIZE;
+    // 拖拽过程中会先吸附到 hidden 位置（保留可见条），结束拖拽时也要把该位置识别为靠边。
+    const snappedToHiddenLeft = Math.abs(bounds.x - leftHiddenX) <= 1;
+    const snappedToHiddenRight = Math.abs(bounds.x - rightHiddenX) <= 1;
+    const nearLeftEdge = leftDistance <= FLOATING_EDGE_TRIGGER_SIZE || snappedToHiddenLeft;
+    const nearRightEdge = rightDistance <= FLOATING_EDGE_TRIGGER_SIZE || snappedToHiddenRight;
     const side = nearLeftEdge
       ? 'left'
       : nearRightEdge
