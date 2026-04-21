@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>demo</title>
+  <style>
+    html, body {
+      margin: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+      overflow: hidden;
+      touch-action: none;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      font-family: "Microsoft YaHei UI", sans-serif;
+    }
+
+    .floating-shell {
+      position: absolute;
+      left: 120px;
+      top: 120px;
+      width: 228px;
+      height: 228px;
+      overflow: visible;
+      border-radius: 50%;
+      touch-action: none;
+    }
+
+    /* 折叠态只显示中心球 */
+    .floating-shell.collapsed {
+      width: 48px;
+      height: 48px;
+    }
+
+    .floating-menu {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      border-radius: 50%;
+      box-sizing: border-box;
+      background: radial-gradient(circle at center, rgba(37, 99, 235, 0.14), rgba(37, 99, 235, 0.04) 58%, transparent 72%);
+      border: 1px solid rgba(133, 176, 255, 0.35);
+      opacity: 1;
+      transition: opacity 120ms ease;
+      pointer-events: none;
+    }
+
+    .floating-shell.collapsed .floating-menu {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .menu-action,
+    .center-node,
+    .data-node {
+      border: 0;
+      cursor: pointer;
+      user-select: none;
+      -webkit-user-select: none;
+      appearance: none;
+      -webkit-appearance: none;
+      outline: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      border-radius: 50%;
+      display: grid;
+      place-items: center;
+      margin: 0;
+      transition: box-shadow 120ms ease, opacity 120ms ease, transform 120ms ease;
+    }
+
+    .center-node {
+      width: 46px;
+      height: 46px;
+      transform: translate(-50%, -50%);
+      color: #fff;
+      font: 700 40px/1 "Microsoft YaHei UI", sans-serif;
+      background: linear-gradient(135deg, #2563eb, #1d4ed8);
+      border: 1px solid rgba(173, 208, 255, 0.46);
+      z-index: 6;
+      touch-action: none;
+    }
+
+    .center-node:active {
+      transform: translate(-50%, -50%) scale(0.96);
+    }
+
+    .center-node.accumulating {
+      font-size: 12px;
+      white-space: pre-line;
+      background: linear-gradient(135deg, #1d4ed8, #163cae);
+    }
+
+    .menu-action {
+      width: 42px;
+      height: 42px;
+      color: #eef4ff;
+      background: linear-gradient(135deg, rgba(24, 73, 179, 0.98), rgba(46, 120, 232, 0.98));
+      border: 1px solid rgba(173, 208, 255, 0.46);
+      font: 700 14px/1 "Microsoft YaHei UI", sans-serif;
+      transform: translate(-50%, -50%) translate(var(--dx, 0px), var(--dy, 0px));
+      opacity: 1;
+      pointer-events: auto;
+      z-index: 4;
+      touch-action: manipulation;
+    }
+
+    .floating-shell.collapsed .menu-action {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .menu-action:hover:not(:disabled),
+    .menu-action.is-active {
+      box-shadow: 0 0 0 6px rgba(73, 131, 248, 0.18), 0 10px 22px rgba(25, 75, 180, 0.36);
+    }
+
+    .menu-action:active {
+      transform: translate(-50%, -50%) translate(var(--dx, 0px), var(--dy, 0px)) scale(0.96);
+    }
+
+    .menu-action::after {
+      content: attr(data-tip);
+      position: absolute;
+      left: 50%;
+      bottom: calc(100% + 8px);
+      transform: translateX(-50%);
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      padding: 5px 8px;
+      border-radius: 8px;
+      font: 500 11px/1.2 "Microsoft YaHei UI", sans-serif;
+      color: #eaf2ff;
+      background: rgba(12, 24, 44, 0.88);
+      border: 1px solid rgba(166, 198, 255, 0.28);
+      transition: opacity 120ms ease;
+    }
+
+    .menu-action:hover::after {
+      opacity: 1;
+    }
+
+    .menu-action:disabled {
+      cursor: default;
+      opacity: 0.52;
+    }
+
+    .menu-action.hidden {
+      display: none !important;
+    }
+
+    .menu-action.orb-main   { --dx:   0px; --dy: -86px; }
+    .menu-action.orb-quick  { --dx:  60px; --dy: -60px; }
+    .menu-action.orb-common { --dx:  86px; --dy:   0px; }
+    .menu-action.orb-delete { --dx:  60px; --dy:  60px; }
+    .menu-action.orb-start  { --dx:   0px; --dy:  86px; }
+    .menu-action.orb-undo   { --dx: -60px; --dy:  60px; }
+    .menu-action.orb-cancel { --dx: -86px; --dy:   0px; }
+    .menu-action.orb-ocr    { --dx: -60px; --dy: -60px; }
+    .menu-action.orb-hide   { --dx: -86px; --dy:   0px; }
+
+    .data-layer {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .floating-shell.collapsed .data-layer {
+      opacity: 0;
+    }
+
+    .data-node {
+      width: 52px;
+      height: 52px;
+      transform: translate(-50%, -50%) scale(0.8);
+      opacity: 0;
+      border: 1px solid rgba(120, 166, 255, 0.48);
+      background: rgba(245, 250, 255, 0.96);
+      color: #355085;
+      font: 600 10px/1.2 "Microsoft YaHei UI", sans-serif;
+      text-align: center;
+      padding: 6px;
+      pointer-events: none;
+      box-shadow: 0 7px 14px rgba(29, 58, 117, 0.16);
+      touch-action: manipulation;
+    }
+
+    .data-node.show {
+      opacity: 1;
+      transform: translate(-50%, -50%) scale(1);
+      pointer-events: auto;
+    }
+
+    .data-node:active {
+      transform: translate(-50%, -50%) scale(0.95);
+    }
+  </style>
+</head>
+<body>
+  <div id="floatingShell" class="floating-shell collapsed" data-side="right">
+    <section id="floatingMenu" class="floating-menu" aria-label="快捷菜单">
+      <button id="openMainWindowBtn" class="menu-action orb-main" type="button" data-tip="打开主窗口">主</button>
+      <button id="quickSaveBtn" class="menu-action orb-quick" type="button" data-tip="收藏剪贴板">存</button>
+      <button id="quickCommonBtn" class="menu-action orb-common" type="button" data-tip="加入常用">常</button>
+      <button id="deleteLastCaptureBtn" class="menu-action orb-delete" type="button" data-tip="删除上次收藏">删</button>
+      <button id="startAccumulationBtn" class="menu-action orb-start" type="button" data-tip="开始累计">始</button>
+      <button id="finishAccumulationBtn" class="menu-action orb-start hidden" type="button" data-tip="结束累计">结</button>
+      <button id="undoAccumulationBtn" class="menu-action orb-undo hidden" type="button" data-tip="撤销上一段">撤</button>
+      <button id="cancelAccumulationBtn" class="menu-action orb-cancel hidden" type="button" data-tip="取消累计">退</button>
+      <button id="screenshotTranslateBtn" class="menu-action orb-ocr" type="button" data-tip="截图翻译">译</button>
+      <button id="hideFloatingBtn" class="menu-action orb-hide" type="button" data-tip="关闭悬浮图标">隐</button>
+      <div id="dataLayer" class="data-layer"></div>
+    </section>
+    <button id="centerNodeBtn" class="center-node" type="button" title="快捷菜单" draggable="false">D</button>
+  </div>
+
+  <script>
+    const shell = document.getElementById('floatingShell');
+    const centerNodeBtn = document.getElementById('centerNodeBtn');
+    const dataLayer = document.getElementById('dataLayer');
+
+    const openMainWindowBtn = document.getElementById('openMainWindowBtn');
+    const quickSaveBtn = document.getElementById('quickSaveBtn');
+    const quickCommonBtn = document.getElementById('quickCommonBtn');
+    const deleteLastCaptureBtn = document.getElementById('deleteLastCaptureBtn');
+    const startAccumulationBtn = document.getElementById('startAccumulationBtn');
+    const finishAccumulationBtn = document.getElementById('finishAccumulationBtn');
+    const undoAccumulationBtn = document.getElementById('undoAccumulationBtn');
+    const cancelAccumulationBtn = document.getElementById('cancelAccumulationBtn');
+    const screenshotTranslateBtn = document.getElementById('screenshotTranslateBtn');
+    const hideFloatingBtn = document.getElementById('hideFloatingBtn');
+
+    const FUNCTION_DATA = {
+      openMainWindowBtn: ['主窗', '页签', '最近'],
+      quickSaveBtn: ['文本', '图片', '链接'],
+      quickCommonBtn: ['高频', '收藏', '置顶'],
+      deleteLastCaptureBtn: ['上次', '撤销', '清理'],
+      startAccumulationBtn: ['段1', '段2', '段3'],
+      finishAccumulationBtn: ['合并', '保存', '完成'],
+      undoAccumulationBtn: ['回退1', '回退2', '回退3'],
+      cancelAccumulationBtn: ['中断', '清空', '恢复'],
+      screenshotTranslateBtn: ['OCR', '翻译', '复制'],
+      hideFloatingBtn: ['隐藏', '还原', '关闭']
+    };
+
+    let menuOpen = false;
+    let accumulation = { active: false, count: 0 };
+    let closeTimer = null;
+    const DOUBLE_CLICK_DELAY_MS = 280;
+    let lastTapAt = 0;
+
+    let dragging = false;
+    let pointerId = null;
+    let startPoint = null;
+    let startPos = null;
+
+    function clearCloseTimer() {
+      if (!closeTimer) return;
+      clearTimeout(closeTimer);
+      closeTimer = null;
+    }
+
+    function getShellCenter() {
+      const r = shell.getBoundingClientRect();
+      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    }
+
+    function setShellByCenter(centerX, centerY) {
+      const size = shell.classList.contains('collapsed') ? 48 : 228;
+      const maxX = window.innerWidth - size;
+      const maxY = window.innerHeight - size;
+      const left = Math.max(0, Math.min(maxX, Math.round(centerX - size / 2)));
+      const top = Math.max(0, Math.min(maxY, Math.round(centerY - size / 2)));
+      shell.style.left = `${left}px`;
+      shell.style.top = `${top}px`;
+    }
+
+    function setMenuOpen(open) {
+      const center = getShellCenter();
+      menuOpen = !!open;
+      shell.classList.toggle('collapsed', !menuOpen);
+      setShellByCenter(center.x, center.y);
+      if (!menuOpen) {
+        clearDataNodes();
+        clearActiveButtons();
+      }
+      renderState();
+    }
+
+    function renderState() {
+      const active = !!accumulation.active;
+      centerNodeBtn.classList.toggle('accumulating', active);
+      centerNodeBtn.textContent = active ? `累计\n${accumulation.count || 0}` : 'D';
+      centerNodeBtn.title = active ? `累计复制中，已收集 ${accumulation.count || 0} 段` : '快捷菜单';
+
+      quickSaveBtn.classList.toggle('hidden', active);
+      quickCommonBtn.classList.toggle('hidden', active);
+      startAccumulationBtn.classList.toggle('hidden', active);
+      finishAccumulationBtn.classList.toggle('hidden', !active);
+      undoAccumulationBtn.classList.toggle('hidden', !active);
+      cancelAccumulationBtn.classList.toggle('hidden', !active);
+      hideFloatingBtn.classList.toggle('hidden', active);
+
+      deleteLastCaptureBtn.disabled = false;
+      deleteLastCaptureBtn.dataset.tip = '删除上次收藏（演示）';
+    }
+
+    function bindTouch(el, handler) {
+      let lock = false;
+      el.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (lock) return;
+        lock = true;
+        handler(event);
+        setTimeout(() => { lock = false; }, 120);
+      }, { passive: false });
+    }
+
+    function clearActiveButtons() {
+      document.querySelectorAll('.menu-action').forEach((btn) => btn.classList.remove('is-active'));
+    }
+
+    function clearDataNodes() {
+      dataLayer.innerHTML = '';
+    }
+
+    function showFunctionData(anchorBtn) {
+      clearDataNodes();
+      clearActiveButtons();
+      anchorBtn.classList.add('is-active');
+
+      const labels = FUNCTION_DATA[anchorBtn.id] || ['数据1', '数据2', '数据3'];
+      const cx = 114 + parseFloat(getComputedStyle(anchorBtn).getPropertyValue('--dx') || '0');
+      const cy = 114 + parseFloat(getComputedStyle(anchorBtn).getPropertyValue('--dy') || '0');
+      const radius = 58;
+      const angles = [210, 260, 310];
+
+      labels.forEach((label, idx) => {
+        const rad = (angles[idx] * Math.PI) / 180;
+        const x = cx + radius * Math.cos(rad);
+        const y = cy + radius * Math.sin(rad);
+        const node = document.createElement('button');
+        node.type = 'button';
+        node.className = 'data-node';
+        node.textContent = label;
+        node.style.left = `${x}px`;
+        node.style.top = `${y}px`;
+        dataLayer.appendChild(node);
+        requestAnimationFrame(() => node.classList.add('show'));
+      });
+    }
+
+    centerNodeBtn.addEventListener('pointerdown', (event) => {
+      event.preventDefault();
+      pointerId = event.pointerId;
+      centerNodeBtn.setPointerCapture(pointerId);
+      dragging = false;
+      startPoint = { x: event.clientX, y: event.clientY };
+      startPos = {
+        left: parseFloat(shell.style.left || '120'),
+        top: parseFloat(shell.style.top || '120')
+      };
+    }, { passive: false });
+
+    centerNodeBtn.addEventListener('pointermove', (event) => {
+      if (pointerId === null || event.pointerId !== pointerId || !startPoint || !startPos) return;
+      const dx = event.clientX - startPoint.x;
+      const dy = event.clientY - startPoint.y;
+      if (!dragging && (Math.abs(dx) > 4 || Math.abs(dy) > 4)) {
+        dragging = true;
+      }
+      if (!dragging) return;
+      const size = shell.classList.contains('collapsed') ? 48 : 228;
+      const maxX = window.innerWidth - size;
+      const maxY = window.innerHeight - size;
+      const nextLeft = Math.max(0, Math.min(maxX, startPos.left + dx));
+      const nextTop = Math.max(0, Math.min(maxY, startPos.top + dy));
+      shell.style.left = `${nextLeft}px`;
+      shell.style.top = `${nextTop}px`;
+    });
+
+    centerNodeBtn.addEventListener('pointerup', (event) => {
+      if (pointerId === null || event.pointerId !== pointerId) return;
+      if (dragging) {
+        dragging = false;
+        pointerId = null;
+        startPoint = null;
+        startPos = null;
+        try { centerNodeBtn.releasePointerCapture(event.pointerId); } catch {}
+        return;
+      }
+      const now = Date.now();
+      if (now - lastTapAt <= DOUBLE_CLICK_DELAY_MS) {
+        lastTapAt = 0;
+        console.log('[demo] 双击中心球：打开主界面');
+      } else {
+        lastTapAt = now;
+        if (!menuOpen) {
+          setMenuOpen(true);
+        }
+      }
+      pointerId = null;
+      startPoint = null;
+      startPos = null;
+      try { centerNodeBtn.releasePointerCapture(event.pointerId); } catch {}
+    });
+
+    centerNodeBtn.addEventListener('pointercancel', (event) => {
+      if (pointerId !== null && event.pointerId === pointerId) {
+        pointerId = null;
+        dragging = false;
+        startPoint = null;
+        startPos = null;
+        try { centerNodeBtn.releasePointerCapture(event.pointerId); } catch {}
+      }
+    });
+
+    bindTouch(openMainWindowBtn, () => showFunctionData(openMainWindowBtn));
+    bindTouch(quickSaveBtn, () => showFunctionData(quickSaveBtn));
+    bindTouch(quickCommonBtn, () => showFunctionData(quickCommonBtn));
+    bindTouch(deleteLastCaptureBtn, () => showFunctionData(deleteLastCaptureBtn));
+    bindTouch(screenshotTranslateBtn, () => showFunctionData(screenshotTranslateBtn));
+    bindTouch(hideFloatingBtn, () => setMenuOpen(false));
+
+    bindTouch(startAccumulationBtn, () => {
+      accumulation.active = true;
+      accumulation.count = 1;
+      renderState();
+      showFunctionData(startAccumulationBtn);
+    });
+
+    bindTouch(finishAccumulationBtn, () => {
+      accumulation.active = false;
+      accumulation.count = 0;
+      renderState();
+      showFunctionData(finishAccumulationBtn);
+    });
+
+    bindTouch(undoAccumulationBtn, () => {
+      accumulation.count = Math.max(0, (accumulation.count || 0) - 1);
+      renderState();
+      showFunctionData(undoAccumulationBtn);
+    });
+
+    bindTouch(cancelAccumulationBtn, () => {
+      accumulation.active = false;
+      accumulation.count = 0;
+      renderState();
+      clearDataNodes();
+      clearActiveButtons();
+    });
+
+    shell.addEventListener('mouseenter', clearCloseTimer);
+    shell.addEventListener('mouseleave', () => {
+      if (!menuOpen) return;
+      clearCloseTimer();
+      closeTimer = setTimeout(() => setMenuOpen(false), 120);
+    });
+
+    window.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape' && menuOpen) {
+        setMenuOpen(false);
+      }
+    });
+
+    window.addEventListener('resize', () => {
+      const center = getShellCenter();
+      setShellByCenter(center.x, center.y);
+      if (menuOpen) {
+        clearDataNodes();
+        clearActiveButtons();
+      }
+    });
+
+    setMenuOpen(false);
+    renderState();
+  </script>
+</body>
+</html>
