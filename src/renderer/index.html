@@ -351,6 +351,22 @@
                     </div>
                   </div>
                   <label class="setting-row"><span>靠边显示</span><input id="dockToEdgeEnabled" type="checkbox" /></label>
+                  <div class="setting-row setting-row-rich">
+                    <div class="setting-row-main">
+                      <span class="setting-label-text">临时便利贴（剪贴板）</span>
+                      <button type="button" class="setting-help-btn" data-help-key="tempSticky" title="查看说明">!</button>
+                      <input id="tempStickyShortcutInput" class="setting-shortcut-input" type="text" spellcheck="false" autocomplete="off" placeholder="Ctrl+B" />
+                      <button type="button" class="shortcut-capture-btn" data-shortcut-target="tempStickyShortcutInput" title="录制快捷键">⌨</button>
+                    </div>
+                    <label class="setting-checkbox-wrap"><input id="tempStickyEnabled" type="checkbox" /></label>
+                  </div>
+                  <div class="settings-key-row">
+                    <span>临时便利贴数据</span>
+                    <div class="setting-path-input-group">
+                      <button id="showTempStickyNotesBtn" class="text-action compact" type="button">展示 JSON 数据</button>
+                      <button id="clearTempStickyNotesBtn" class="text-action compact danger" type="button">清空 JSON 数据</button>
+                    </div>
+                  </div>
                 </div>
 
                 <div class="settings-subhead">路径配置</div>

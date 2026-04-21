@@ -184,10 +184,14 @@ const els = {
   accumulationStartShortcutInput: document.getElementById('accumulationStartShortcutInput'),
   accumulationFinishShortcutInput: document.getElementById('accumulationFinishShortcutInput'),
   accumulationUndoShortcutInput: document.getElementById('accumulationUndoShortcutInput'),
+  tempStickyShortcutInput: document.getElementById('tempStickyShortcutInput'),
   hotkeyDeleteLastEnabled: document.getElementById('hotkeyDeleteLastEnabled'),
   hotkeyStartAccumEnabled: document.getElementById('hotkeyStartAccumEnabled'),
   hotkeyFinishAccumEnabled: document.getElementById('hotkeyFinishAccumEnabled'),
   hotkeyUndoAccumEnabled: document.getElementById('hotkeyUndoAccumEnabled'),
+  tempStickyEnabled: document.getElementById('tempStickyEnabled'),
+  showTempStickyNotesBtn: document.getElementById('showTempStickyNotesBtn'),
+  clearTempStickyNotesBtn: document.getElementById('clearTempStickyNotesBtn'),
   selfBuiltWorkspaceDirInput: document.getElementById('selfBuiltWorkspaceDirInput'),
   selectSelfBuiltWorkspaceDirBtn: document.getElementById('selectSelfBuiltWorkspaceDirBtn'),
   assetBackupPathInput: document.getElementById('assetBackupPathInput'),
@@ -1688,6 +1692,11 @@ const SETTINGS_HELP = {
     subline: '仅在累计会话中',
     body: '在累计复制过程中，移除最后追加的一段文本。中间留空则不会注册全局热键，请用悬浮球菜单；填写快捷键并打开右侧开关后可全局触发。'
   },
+  tempSticky: {
+    title: '临时便利贴（剪贴板）',
+    subline: 'Electron 全局快捷键，默认 Ctrl+B',
+    body: '开启后按快捷键会把当前剪贴板文本投放为屏幕便利贴。便利贴点击“复制”仅复制文本；点击“关闭”只会隐藏显示，不会删除 JSON。可在设置里展示 JSON 内全部便利贴，或一键清空 JSON。'
+  },
   translateApi: {
     title: '翻译模式',
     subline: '默认公共 API + 自动回退',
@@ -1913,6 +1922,11 @@ function renderSettings() {
   if (els.accumulationUndoShortcutInput) {
     els.accumulationUndoShortcutInput.value = s.accumulationUndoShortcut || '';
   }
+  if (els.tempStickyShortcutInput) {
+    els.tempStickyShortcutInput.value = s.tempStickyShortcut != null
+      ? s.tempStickyShortcut
+      : 'Ctrl+B';
+  }
   if (els.hotkeyDeleteLastEnabled) {
     els.hotkeyDeleteLastEnabled.checked = s.hotkeyDeleteLastEnabled !== false;
   }
@@ -1924,6 +1938,9 @@ function renderSettings() {
   }
   if (els.hotkeyUndoAccumEnabled) {
     els.hotkeyUndoAccumEnabled.checked = !!s.hotkeyUndoAccumEnabled;
+  }
+  if (els.tempStickyEnabled) {
+    els.tempStickyEnabled.checked = !!s.tempStickyEnabled;
   }
   if (els.selfBuiltWorkspaceDirInput) {
     const raw = s.selfBuiltWorkspaceDir
@@ -2246,10 +2263,12 @@ function collectSettings() {
     accumulationStartShortcut: (els.accumulationStartShortcutInput?.value || '').trim(),
     accumulationFinishShortcut: (els.accumulationFinishShortcutInput?.value || '').trim(),
     accumulationUndoShortcut: (els.accumulationUndoShortcutInput?.value || '').trim(),
+    tempStickyShortcut: (els.tempStickyShortcutInput?.value || '').trim() || 'Ctrl+B',
     hotkeyDeleteLastEnabled: !!els.hotkeyDeleteLastEnabled?.checked,
     hotkeyStartAccumEnabled: !!els.hotkeyStartAccumEnabled?.checked,
     hotkeyFinishAccumEnabled: !!els.hotkeyFinishAccumEnabled?.checked,
     hotkeyUndoAccumEnabled: !!els.hotkeyUndoAccumEnabled?.checked,
+    tempStickyEnabled: !!els.tempStickyEnabled?.checked,
     selfBuiltWorkspaceDir,
     browserScanRoot: selfBuiltWorkspaceDir,
     selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
@@ -3063,6 +3082,23 @@ els.selectAssetBackupPathBtn?.addEventListener('click', async () => {
   const result = await window.deskLibrary.selectFolder();
   if (result && !result.canceled && result.path) {
     els.assetBackupPathInput.value = result.path;
+  }
+});
+
+els.showTempStickyNotesBtn?.addEventListener('click', async () => {
+  const result = await window.deskLibrary.showAllTempStickyNotes();
+  if (result && result.ok === false) {
+    alert(result.message || '展示临时便利贴失败');
+  }
+});
+
+els.clearTempStickyNotesBtn?.addEventListener('click', async () => {
+  if (!window.confirm('确认清空临时便利贴 JSON 数据吗？该操作无法恢复。')) {
+    return;
+  }
+  const result = await window.deskLibrary.clearTempStickyNotes();
+  if (result && result.ok === false) {
+    alert(result.message || '清空临时便利贴失败');
   }
 });
 

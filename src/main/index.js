@@ -44,11 +44,15 @@ const MAIN_WINDOW_HIDE_DELAY_MS = 220;
 const MAIN_WINDOW_DRAG_SUSPEND_MS = 320;
 const HOVER_SYNC_INTERVAL_MS = 120;
 const FLOATING_MENU_AUTO_CLOSE_GUARD_MS = 260;
+const TEMP_STICKY_DEFAULT_WIDTH = 260;
+const TEMP_STICKY_DEFAULT_HEIGHT = 76;
+const TEMP_STICKY_PADDING = 12;
 const ACTIVE_WINDOW_HELPER_PATH = path.join(__dirname, 'bin', 'ActiveWindowInfo.exe');
 
 let mainWindow = null;
 let floatingWindow = null;
 let floatingMenuWindow = null;
+let tempStickyWindow = null;
 let screenshotSelectionWindow = null;
 let screenshotResultWindow = null;
 let lastScreenshotResultPayload = null;
@@ -91,6 +95,7 @@ let mainWindowDragSuspendUntil = 0;
 let mainWindowDragSettleTimer = null;
 let hoverSyncTimer = null;
 let registeredGlobalAccelerators = [];
+let hotkeyWarningText = '';
 
 function getApiConfigPath() {
   return path.join(app.getPath('userData'), 'api-config.json');
@@ -1109,6 +1114,176 @@ function createFloatingMenuWindow() {
   });
 }
 
+function getTempStickyViewport() {
+  const cursor = screen.getCursorScreenPoint();
+  const display = screen.getDisplayNearestPoint(cursor);
+  const workArea = display.workArea;
+  return {
+    x: workArea.x,
+    y: workArea.y,
+    width: workArea.width,
+    height: workArea.height,
+    displayId: String(display.id)
+  };
+}
+
+function clampTempStickyPosition(rawX, rawY, viewport = getTempStickyViewport()) {
+  const minX = viewport.x + TEMP_STICKY_PADDING;
+  const minY = viewport.y + TEMP_STICKY_PADDING;
+  const maxX = viewport.x + viewport.width - TEMP_STICKY_DEFAULT_WIDTH - TEMP_STICKY_PADDING;
+  const maxY = viewport.y + viewport.height - TEMP_STICKY_DEFAULT_HEIGHT - TEMP_STICKY_PADDING;
+  return {
+    x: Math.max(minX, Math.min(maxX, Math.round(Number(rawX) || minX))),
+    y: Math.max(minY, Math.min(maxY, Math.round(Number(rawY) || minY)))
+  };
+}
+
+function getDefaultTempStickyPosition() {
+  const viewport = getTempStickyViewport();
+  const visibleCount = storage.getAllTempStickyNotes().filter((item) => item.visible !== false).length;
+  const baseX = viewport.x + viewport.width - TEMP_STICKY_DEFAULT_WIDTH - 28;
+  const baseY = viewport.y + 48;
+  const offset = (visibleCount % 6) * 24;
+  return clampTempStickyPosition(baseX - offset, baseY + offset, viewport);
+}
+
+function createTempStickyWindow() {
+  const viewport = getTempStickyViewport();
+  tempStickyWindow = new BrowserWindow({
+    x: viewport.x,
+    y: viewport.y,
+    width: viewport.width,
+    height: viewport.height,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    show: false,
+    skipTaskbar: true,
+    alwaysOnTop: true,
+    movable: false,
+    focusable: true,
+    hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'sticky-preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+  tempStickyWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  tempStickyWindow.loadFile(path.join(__dirname, '../renderer/sticky-notes.html'));
+  tempStickyWindow.on('closed', () => {
+    tempStickyWindow = null;
+  });
+  tempStickyWindow.once('ready-to-show', () => {
+    tempStickyWindow.setIgnoreMouseEvents(true, { forward: true });
+    syncTempStickyWindowBounds();
+    sendTempStickyState();
+    syncTempStickyWindowVisibility();
+  });
+}
+
+function syncTempStickyWindowBounds() {
+  if (!tempStickyWindow || tempStickyWindow.isDestroyed()) return;
+  const viewport = getTempStickyViewport();
+  tempStickyWindow.setBounds({
+    x: viewport.x,
+    y: viewport.y,
+    width: viewport.width,
+    height: viewport.height
+  });
+}
+
+function getVisibleTempStickyNotes() {
+  const viewport = getTempStickyViewport();
+  return storage.getAllTempStickyNotes()
+    .filter((item) => item.visible !== false)
+    .map((item) => {
+      const next = clampTempStickyPosition(item.x, item.y, viewport);
+      if (next.x !== item.x || next.y !== item.y || String(item.displayId || '') !== viewport.displayId) {
+        storage.updateTempStickyNote(item.id, { ...next, displayId: viewport.displayId });
+      }
+      return {
+        ...item,
+        ...next,
+        displayId: viewport.displayId
+      };
+    });
+}
+
+function sendTempStickyState() {
+  if (!tempStickyWindow || tempStickyWindow.isDestroyed() || !tempStickyWindow.webContents || tempStickyWindow.webContents.isDestroyed()) {
+    return;
+  }
+  tempStickyWindow.webContents.send('temp-sticky-state', {
+    notes: getVisibleTempStickyNotes(),
+    viewport: getTempStickyViewport()
+  });
+}
+
+function syncTempStickyWindowVisibility() {
+  if (!tempStickyWindow || tempStickyWindow.isDestroyed()) return;
+  const visibleNotes = getVisibleTempStickyNotes();
+  if (visibleNotes.length) {
+    if (!tempStickyWindow.isVisible()) {
+      tempStickyWindow.showInactive();
+    }
+    tempStickyWindow.setIgnoreMouseEvents(true, { forward: true });
+    tempStickyWindow.moveTop();
+    sendTempStickyState();
+    return;
+  }
+  if (tempStickyWindow.isVisible()) {
+    tempStickyWindow.hide();
+  }
+}
+
+function createTempStickyFromClipboard({ source = 'manual' } = {}) {
+  const settings = getSettings();
+  if (source === 'hotkey' && !settings.tempStickyEnabled) {
+    return { ok: false, message: '临时便利贴未开启' };
+  }
+  const text = String(clipboard.readText() || '').replace(/\r\n/g, '\n').trim();
+  if (!text) {
+    sendSnapshot('剪贴板里没有可放入便利贴的文本');
+    return { ok: false, message: '剪贴板里没有可放入便利贴的文本' };
+  }
+  const viewport = getTempStickyViewport();
+  const position = getDefaultTempStickyPosition();
+  const created = storage.addTempStickyNote({
+    text,
+    visible: true,
+    x: position.x,
+    y: position.y,
+    displayId: viewport.displayId
+  });
+  if (!created) {
+    return { ok: false, message: '创建临时便利贴失败' };
+  }
+  sendTempStickyState();
+  syncTempStickyWindowVisibility();
+  sendSnapshot('已创建临时便利贴');
+  return { ok: true, note: created };
+}
+
+function showAllTempStickyNotes() {
+  storage.setTempStickyVisibleAll(true);
+  sendTempStickyState();
+  syncTempStickyWindowVisibility();
+  sendSnapshot('临时便利贴已显示');
+  return { ok: true };
+}
+
+function clearTempStickyNotes() {
+  storage.clearTempStickyNotes();
+  sendTempStickyState();
+  syncTempStickyWindowVisibility();
+  sendSnapshot('临时便利贴已清空');
+  return { ok: true };
+}
+
 function createTray() {
   tray = new Tray(createTrayIcon());
   tray.setToolTip('DeskLibrary');
@@ -1852,6 +2027,9 @@ function defaultStatusText() {
   if (observing) {
     return currentObserveStatusText();
   }
+  if (hotkeyWarningText) {
+    return hotkeyWarningText;
+  }
   return '后台监听中';
 }
 
@@ -2230,6 +2408,57 @@ function markPollingSuppressed(signature) {
   suppressedPollingUntil = Date.now() + SHORTCUT_POLL_SUPPRESS_MS;
 }
 
+function writeInternalTextToClipboard(text) {
+  const value = String(text || '');
+  const signature = storage.hashText(value);
+  ignoreNextClipboardChange = true;
+  lastClipboardSignature = signature;
+  markPollingSuppressed(signature);
+  clipboard.writeText(value);
+}
+
+function normalizeShortcutForCompare(shortcut) {
+  const parsed = parseShortcutTokens(shortcut);
+  if (!parsed) return '';
+  const modifierOrder = ['ctrl', 'alt', 'shift', 'meta'];
+  const modifiers = modifierOrder.filter((item) => parsed.modifiers.has(item));
+  return [...modifiers, parsed.key].filter(Boolean).join('+');
+}
+
+function validateGlobalShortcutConflicts(settings) {
+  const shortcutEntries = [];
+  const addEntry = (enabled, shortcut, label) => {
+    if (!enabled) return;
+    const normalized = normalizeShortcutForCompare(shortcut);
+    if (!normalized) return;
+    shortcutEntries.push({ normalized, label, shortcut: String(shortcut || '').trim() });
+  };
+
+  addEntry(settings.hotkeyDeleteLastEnabled !== false, settings.deleteLastCaptureShortcut, '删除上次收藏');
+  addEntry(settings.hotkeyStartAccumEnabled !== false, settings.accumulationStartShortcut, '开始累计');
+  addEntry(settings.hotkeyFinishAccumEnabled !== false, settings.accumulationFinishShortcut, '结束累计');
+  addEntry(!!settings.hotkeyUndoAccumEnabled, settings.accumulationUndoShortcut, '撤销上一段');
+  addEntry(!!settings.tempStickyEnabled, settings.tempStickyShortcut, '临时便利贴投放');
+
+  const hit = new Map();
+  for (const entry of shortcutEntries) {
+    if (!hit.has(entry.normalized)) {
+      hit.set(entry.normalized, [entry]);
+      continue;
+    }
+    hit.get(entry.normalized).push(entry);
+  }
+
+  for (const list of hit.values()) {
+    if (list.length <= 1) continue;
+    return {
+      ok: false,
+      message: `快捷键冲突：${list.map((item) => `${item.label}(${item.shortcut})`).join(' 与 ')}`
+    };
+  }
+  return { ok: true };
+}
+
 function isConfiguredPostCopyKeyPressed() {
   const configured = parseShortcutTokens(getSettings().postCopyKey);
   if (!configured) return false;
@@ -2580,10 +2809,18 @@ function registerGlobalAccelerator(accelerator, handler) {
 function refreshGlobalShortcuts() {
   unregisterTrackedGlobalShortcuts();
   const settings = getSettings();
+  const registerFailedLabels = [];
+  const registerOrMark = (acc, label, handler) => {
+    const ok = registerGlobalAccelerator(acc, handler);
+    if (!ok) {
+      registerFailedLabels.push(`${label}(${acc})`);
+    }
+    return ok;
+  };
 
   const del = String(settings.deleteLastCaptureShortcut || '').trim();
   if (settings.hotkeyDeleteLastEnabled !== false && del) {
-    registerGlobalAccelerator(del, () => {
+    registerOrMark(del, '删除上次收藏', () => {
       if (getSettings().hotkeyDeleteLastEnabled === false) return;
       deleteLastCapture();
     });
@@ -2591,7 +2828,7 @@ function refreshGlobalShortcuts() {
 
   const startAcc = String(settings.accumulationStartShortcut || '').trim();
   if (settings.hotkeyStartAccumEnabled !== false && startAcc) {
-    registerGlobalAccelerator(startAcc, () => {
+    registerOrMark(startAcc, '开始累计', () => {
       if (getSettings().hotkeyStartAccumEnabled === false) return;
       startAccumulation();
     });
@@ -2599,7 +2836,7 @@ function refreshGlobalShortcuts() {
 
   const finishAcc = String(settings.accumulationFinishShortcut || '').trim();
   if (settings.hotkeyFinishAccumEnabled !== false && finishAcc) {
-    registerGlobalAccelerator(finishAcc, () => {
+    registerOrMark(finishAcc, '结束累计', () => {
       if (getSettings().hotkeyFinishAccumEnabled === false) return;
       finishAccumulation();
     });
@@ -2607,10 +2844,25 @@ function refreshGlobalShortcuts() {
 
   const undoAcc = String(settings.accumulationUndoShortcut || '').trim();
   if (settings.hotkeyUndoAccumEnabled && undoAcc) {
-    registerGlobalAccelerator(undoAcc, () => {
+    registerOrMark(undoAcc, '撤销上一段', () => {
       if (!getSettings().hotkeyUndoAccumEnabled) return;
       undoAccumulation();
     });
+  }
+
+  const tempStickyShortcut = String(settings.tempStickyShortcut || '').trim();
+  if (settings.tempStickyEnabled && tempStickyShortcut) {
+    registerOrMark(tempStickyShortcut, '临时便利贴投放', () => {
+      if (!getSettings().tempStickyEnabled) return;
+      createTempStickyFromClipboard({ source: 'hotkey' });
+    });
+  }
+
+  if (registerFailedLabels.length) {
+    hotkeyWarningText = `全局快捷键注册失败：${registerFailedLabels.join('、')}`;
+    sendSnapshot(hotkeyWarningText);
+  } else {
+    hotkeyWarningText = '';
   }
 }
 
@@ -2622,6 +2874,8 @@ function applySystemSettings(settings) {
   syncStartupSettingFromSystem();
   syncFloatingWindowVisibility();
   syncMainWindowDockVisibility();
+  sendTempStickyState();
+  syncTempStickyWindowVisibility();
   refreshGlobalShortcuts();
 }
 
@@ -2820,24 +3074,27 @@ function setupIpc() {
         || settings?.browserScanRoot
         || ''
       ).trim();
-      
-      // 调试日志
-      console.log('[save-settings] Received assetBackupPath:', settings?.assetBackupPath);
-      
-      const saved = storage.saveSettings({
+
+      const nextSettings = {
         ...getSettings(),
         ...settings,
         selfBuiltWorkspaceDir,
         browserScanRoot: selfBuiltWorkspaceDir,
         selfBuiltUserDataRoot: selfBuiltWorkspaceDir,
         selfBuiltChromePath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chrome.exe') : '',
-        selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chromedriver.exe') : ''
-      });
-      
-      // 调试日志
-      console.log('[save-settings] Saved assetBackupPath:', saved?.assetBackupPath);
-      
+        selfBuiltChromedriverPath: selfBuiltWorkspaceDir ? path.join(selfBuiltWorkspaceDir, 'chromedriver.exe') : '',
+        tempStickyShortcut: String(settings?.tempStickyShortcut || getSettings().tempStickyShortcut || 'Ctrl+B').trim() || 'Ctrl+B'
+      };
+
+      const conflict = validateGlobalShortcutConflicts(nextSettings);
+      if (!conflict.ok) {
+        return conflict;
+      }
+
+      const saved = storage.saveSettings(nextSettings);
       applySystemSettings(saved);
+      sendTempStickyState();
+      syncTempStickyWindowVisibility();
       sendSnapshot('设置已保存');
       return { ok: true };
     } catch (error) {
@@ -2907,7 +3164,7 @@ function setupIpc() {
     }
 
     if (record.contentType === 'text') {
-      clipboard.writeText(record.textContent || '');
+      writeInternalTextToClipboard(record.textContent || '');
       return { ok: true };
     }
 
@@ -3714,7 +3971,62 @@ function setupIpc() {
 
   ipcMain.handle('screenshot-copy-text', async (_, text = '') => {
     const value = String(text || '');
-    clipboard.writeText(value);
+    writeInternalTextToClipboard(value);
+    return { ok: true };
+  });
+
+  ipcMain.handle('temp-sticky-create-from-clipboard', async () => createTempStickyFromClipboard({ source: 'manual' }));
+
+  ipcMain.handle('temp-sticky-show-all', async () => showAllTempStickyNotes());
+
+  ipcMain.handle('temp-sticky-clear-all', async () => clearTempStickyNotes());
+
+  ipcMain.handle('temp-sticky-get-state', async () => ({
+    notes: getVisibleTempStickyNotes(),
+    viewport: getTempStickyViewport()
+  }));
+
+  ipcMain.handle('temp-sticky-copy-note', async (_, noteId) => {
+    const note = storage.getAllTempStickyNotes().find((item) => item.id === Number(noteId));
+    if (!note) return { ok: false, message: '便利贴不存在' };
+    writeInternalTextToClipboard(note.text || '');
+    sendSnapshot('已复制便利贴内容');
+    return { ok: true };
+  });
+
+  ipcMain.handle('temp-sticky-hide-note', async (_, noteId) => {
+    const updated = storage.updateTempStickyNote(noteId, { visible: false });
+    if (!updated) return { ok: false, message: '便利贴不存在' };
+    sendTempStickyState();
+    syncTempStickyWindowVisibility();
+    return { ok: true };
+  });
+
+  ipcMain.handle('temp-sticky-delete-note', async (_, noteId) => {
+    const ok = storage.deleteTempStickyNote(noteId);
+    if (!ok) return { ok: false, message: '便利贴不存在' };
+    sendTempStickyState();
+    syncTempStickyWindowVisibility();
+    return { ok: true };
+  });
+
+  ipcMain.handle('temp-sticky-move-note', async (_, payload = {}) => {
+    const id = Number(payload.id);
+    const viewport = getTempStickyViewport();
+    const next = clampTempStickyPosition(payload.x, payload.y, viewport);
+    const updated = storage.updateTempStickyNote(id, {
+      x: next.x,
+      y: next.y,
+      displayId: viewport.displayId
+    });
+    if (!updated) return { ok: false, message: '便利贴不存在' };
+    sendTempStickyState();
+    return { ok: true };
+  });
+
+  ipcMain.handle('temp-sticky-set-interactive', async (_, interactive) => {
+    if (!tempStickyWindow || tempStickyWindow.isDestroyed()) return { ok: false };
+    tempStickyWindow.setIgnoreMouseEvents(!interactive, { forward: true });
     return { ok: true };
   });
 
@@ -4022,6 +4334,7 @@ app.whenReady().then(() => {
   createWindow();
   createFloatingWindow();
   createFloatingMenuWindow();
+  createTempStickyWindow();
   createTray();
   setupClipboardPolling();
   setupKeyboardListener();
@@ -4038,6 +4351,9 @@ app.whenReady().then(() => {
         height: menuBounds.height
       });
     }
+    syncTempStickyWindowBounds();
+    sendTempStickyState();
+    syncTempStickyWindowVisibility();
   });
   sendSnapshot('后台监听中');
 }).catch((error) => {
@@ -4062,6 +4378,9 @@ app.on('will-quit', () => {
 app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
+    createFloatingWindow();
+    createFloatingMenuWindow();
+    createTempStickyWindow();
   } else {
     showWindow();
   }

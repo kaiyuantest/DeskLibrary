@@ -27,6 +27,7 @@ class StorageService {
     this.browserCardsFile = path.join(this.dataDir, 'browserCards.json');
     this.settingsFile = path.join(this.dataDir, 'settings.json');
     this.duplicateFile = path.join(this.dataDir, 'duplicate-notices.json');
+    this.tempStickyNotesFile = path.join(this.dataDir, 'temp-sticky-notes.json');
 
     fs.mkdirSync(this.imagesDir, { recursive: true });
     fs.mkdirSync(this.defaultAssetsDir, { recursive: true });
@@ -34,6 +35,7 @@ class StorageService {
     this.ensureFile(this.recordsFile, []);
     this.ensureFile(this.assetsFile, []);
     this.ensureFile(this.browserCardsFile, []);
+    this.ensureFile(this.tempStickyNotesFile, []);
     this.ensureFile(this.settingsFile, {
       autoJudgmentEnabled: false,
       doubleCopyEnabled: false,
@@ -43,6 +45,8 @@ class StorageService {
       hotkeyStartAccumEnabled: true,
       hotkeyFinishAccumEnabled: true,
       hotkeyUndoAccumEnabled: true,
+      tempStickyEnabled: false,
+      tempStickyShortcut: 'Ctrl+B',
       accumulationStartShortcut: 'Ctrl+Alt+A',
       accumulationFinishShortcut: 'Ctrl+Alt+S',
       accumulationCancelShortcut: 'Ctrl+Alt+X',
@@ -222,6 +226,8 @@ class StorageService {
       hotkeyStartAccumEnabled: true,
       hotkeyFinishAccumEnabled: true,
       hotkeyUndoAccumEnabled: true,
+      tempStickyEnabled: false,
+      tempStickyShortcut: 'Ctrl+B',
       accumulationStartShortcut: 'Ctrl+Alt+A',
       accumulationFinishShortcut: 'Ctrl+Alt+S',
       accumulationCancelShortcut: 'Ctrl+Alt+X',
@@ -286,6 +292,98 @@ class StorageService {
       const timeB = new Date(b.updatedAt || b.createdAt).getTime();
       return timeB - timeA;
     });
+  }
+
+  normalizeTempStickyNote(note = {}) {
+    const createdAt = note.createdAt ? new Date(note.createdAt) : new Date();
+    const updatedAt = note.updatedAt ? new Date(note.updatedAt) : createdAt;
+    const text = String(note.text || '').replace(/\r\n/g, '\n').trim();
+    return {
+      id: Number(note.id) || 0,
+      text,
+      visible: note.visible !== false,
+      x: Number.isFinite(note.x) ? Math.round(note.x) : null,
+      y: Number.isFinite(note.y) ? Math.round(note.y) : null,
+      displayId: String(note.displayId || '').trim(),
+      createdAt: createdAt.toISOString(),
+      updatedAt: updatedAt.toISOString()
+    };
+  }
+
+  getAllTempStickyNotes() {
+    return this.readJson(this.tempStickyNotesFile, [])
+      .map((item) => this.normalizeTempStickyNote(item))
+      .filter((item) => item.id > 0 && item.text)
+      .sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.createdAt).getTime();
+        const timeB = new Date(b.updatedAt || b.createdAt).getTime();
+        return timeB - timeA;
+      });
+  }
+
+  addTempStickyNote(payload = {}) {
+    const notes = this.getAllTempStickyNotes();
+    const text = String(payload.text || '').replace(/\r\n/g, '\n').trim();
+    if (!text) return null;
+    const now = new Date().toISOString();
+    const maxId = notes.length ? Math.max(...notes.map((item) => Number(item.id) || 0)) : 0;
+    const note = this.normalizeTempStickyNote({
+      id: maxId + 1,
+      text,
+      visible: payload.visible !== false,
+      x: Number.isFinite(payload.x) ? payload.x : null,
+      y: Number.isFinite(payload.y) ? payload.y : null,
+      displayId: String(payload.displayId || '').trim(),
+      createdAt: now,
+      updatedAt: now
+    });
+    notes.unshift(note);
+    const limited = notes.slice(0, 200);
+    this.writeJson(this.tempStickyNotesFile, limited);
+    return note;
+  }
+
+  updateTempStickyNote(noteId, updates = {}) {
+    const notes = this.getAllTempStickyNotes();
+    const index = notes.findIndex((item) => item.id === Number(noteId));
+    if (index < 0) return null;
+    const current = notes[index];
+    const next = this.normalizeTempStickyNote({
+      ...current,
+      ...updates,
+      id: current.id,
+      text: updates.text == null ? current.text : String(updates.text),
+      updatedAt: new Date().toISOString()
+    });
+    notes[index] = next;
+    this.writeJson(this.tempStickyNotesFile, notes);
+    return next;
+  }
+
+  setTempStickyVisibleAll(visible) {
+    const notes = this.getAllTempStickyNotes();
+    const nextVisible = !!visible;
+    const now = new Date().toISOString();
+    const next = notes.map((item) => this.normalizeTempStickyNote({
+      ...item,
+      visible: nextVisible,
+      updatedAt: now
+    }));
+    this.writeJson(this.tempStickyNotesFile, next);
+    return next;
+  }
+
+  clearTempStickyNotes() {
+    this.writeJson(this.tempStickyNotesFile, []);
+    return true;
+  }
+
+  deleteTempStickyNote(noteId) {
+    const notes = this.getAllTempStickyNotes();
+    const next = notes.filter((item) => item.id !== Number(noteId));
+    if (next.length === notes.length) return false;
+    this.writeJson(this.tempStickyNotesFile, next);
+    return true;
   }
 
   getDateFilters() {
