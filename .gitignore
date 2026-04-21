@@ -1,0 +1,91 @@
+# 依赖
+node_modules/
+
+# 构建产物
+release/
+dist/
+*.exe
+*.dmg
+*.AppImage
+
+# 用户数据（包含个人信息，不要上传）
+data/
+%SystemDrive%/
+.gitdata/
+Chrome/
+
+# 临时文件和调试文件
+tmp-print-userdata.js
+*.log
+*.tmp
+
+# 调试和临时文档（不上传）
+ASSET_VAULT_*.md
+BACKUP_PATH_*.md
+CDP_DEBUG.md
+COMMON_PAGE_*.md
+COMPLETE_TEST.md
+COOKIE_FIX_*.md
+CRITICAL_FIX.md
+FINAL_FIX.md
+FINAL_SETUP_SUMMARY.md
+GIT_SETUP_GUIDE.md
+ONLINE_REFRESH_FIX.md
+QUICK_START.md
+REMOVE_ALTQ_FEATURE.md
+REPOSITORY_SETUP_COMPLETE.md
+STATUS_REPORT.md
+SUMMARY.md
+TEST_*.md
+UI_*.md
+upload-commands.txt
+git-push.sh
+git-push.bat
+UPLOAD_NOW.bat
+清理无关文件.bat
+清理并推送.bat
+上传到GitHub.bat
+
+# 敏感信息
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# 私钥与证书
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+
+# 凭证与密钥文件
+credentials.json
+credentials.*.json
+secrets.json
+secret.json
+token.json
+*.token
+
+# 数据库与日志
+*.sqlite
+*.sqlite3
+*.db
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 操作系统
+.DS_Store
+Thumbs.db
+desktop.ini

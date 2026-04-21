@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Screenshot Translate</title>
+    <link rel="stylesheet" href="./screenshot-result.css" />
+  </head>
+  <body>
+    <main class="panel">
+      <section class="preview-wrap">
+        <img id="captureImg" class="capture-img" alt="截图" />
+        <div class="img-actions">
+          <button id="translateBtn" type="button">翻译</button>
+          <button id="copyBtn" type="button">复制</button>
+          <button id="closeBtn" type="button">关闭</button>
+        </div>
+      </section>
+      <section class="text-wrap">
+        <h4>识别文本</h4>
+        <textarea id="ocrText" readonly></textarea>
+        <h4>翻译结果</h4>
+        <textarea id="translatedText" readonly></textarea>
+      </section>
+    </main>
+    <script src="./screenshot-result.js"></script>
+  </body>
+</html>
