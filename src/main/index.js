@@ -28,8 +28,8 @@ const FLOATING_SLIDE_INTERVAL_MS = 10;
 const FLOATING_HIDE_DELAY_MS = 180;
 const FLOATING_EDGE_TRIGGER_SIZE = 18;
 const FLOATING_MENU_GAP = 0;
-const FLOATING_MENU_WIDTH = 500;
-const FLOATING_MENU_HEIGHT = 500;
+const FLOATING_MENU_WIDTH = 620;
+const FLOATING_MENU_HEIGHT = 620;
 const FLOATING_TEST_DISABLE_EXPAND = false;
 const FLOATING_TEST_DISABLE_DOCK_HIDE = false;
 const FLOATING_TEST_DISABLE_HOVER_SYNC = false;
@@ -41,6 +41,7 @@ const MAIN_WINDOW_EDGE_TRIGGER_SIZE = 18;
 const MAIN_WINDOW_SLIDE_STEP = 20;
 const MAIN_WINDOW_SLIDE_INTERVAL_MS = 10;
 const MAIN_WINDOW_HIDE_DELAY_MS = 220;
+const MAIN_WINDOW_DRAG_SUSPEND_MS = 320;
 const HOVER_SYNC_INTERVAL_MS = 120;
 const FLOATING_MENU_AUTO_CLOSE_GUARD_MS = 120;
 const ACTIVE_WINDOW_HELPER_PATH = path.join(__dirname, 'bin', 'ActiveWindowInfo.exe');
@@ -84,6 +85,8 @@ let mainWindowSlideTimer = null;
 let mainWindowDockMode = 'visible';
 let mainWindowDockCache = null;
 let mainWindowHideTimer = null;
+let mainWindowDragSuspendUntil = 0;
+let mainWindowDragSettleTimer = null;
 let hoverSyncTimer = null;
 let registeredGlobalAccelerators = [];
 
@@ -651,6 +654,7 @@ function createWindow() {
     if (mainWindowSlideTimer || !mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible() || mainWindow.isMaximized()) {
       return;
     }
+    markMainWindowUserMoving();
     if (mainWindowDockMode === 'visible') {
       updateMainWindowDockCache();
     }
@@ -674,6 +678,7 @@ function createWindow() {
   mainWindow.on('close', (event) => {
     if (!app.isQuitting) {
       event.preventDefault();
+      clearMainWindowDragSettleTimer();
       clearMainWindowHideTimer();
       stopMainWindowAnimation();
       mainWindow.setSkipTaskbar(true);
@@ -729,7 +734,8 @@ function getFloatingBounds(mode = 'hidden', expanded = floatingMenuOpen) {
   const centerX = anchor.x + (buttonWidth / 2);
   const centerY = anchor.y + (buttonHeight / 2);
   const useExpanded = expanded && !FLOATING_TEST_DISABLE_EXPAND;
-  const width = useExpanded ? FLOATING_MENU_WIDTH : FLOATING_WINDOW_SIZE;
+  const availableWidth = Math.max(FLOATING_WINDOW_SIZE, workArea.width - FLOATING_WINDOW_MARGIN * 2);
+  const width = useExpanded ? Math.min(availableWidth, FLOATING_MENU_WIDTH) : FLOATING_WINDOW_SIZE;
   const availableHeight = Math.max(FLOATING_WINDOW_SIZE, workArea.height - FLOATING_WINDOW_MARGIN * 2);
   const height = useExpanded ? Math.min(availableHeight, FLOATING_MENU_HEIGHT) : FLOATING_WINDOW_SIZE;
   const maxX = workArea.x + workArea.width - width;
@@ -747,6 +753,8 @@ function getFloatingBounds(mode = 'hidden', expanded = floatingMenuOpen) {
       x = Math.round(centerX - (width / 2));
       y = Math.round(centerY - (height / 2));
     }
+    x = Math.max(workArea.x, Math.min(x, maxX));
+    y = Math.max(workArea.y, Math.min(y, maxY));
     floatingMenuSide = side === 'left' ? 'left' : 'right';
   } else {
     floatingMenuSide = side === 'left' ? 'left' : 'right';
@@ -785,6 +793,28 @@ function clearMainWindowHideTimer() {
     clearTimeout(mainWindowHideTimer);
     mainWindowHideTimer = null;
   }
+}
+
+function clearMainWindowDragSettleTimer() {
+  if (mainWindowDragSettleTimer) {
+    clearTimeout(mainWindowDragSettleTimer);
+    mainWindowDragSettleTimer = null;
+  }
+}
+
+function markMainWindowUserMoving() {
+  mainWindowDragSuspendUntil = Date.now() + MAIN_WINDOW_DRAG_SUSPEND_MS;
+  clearMainWindowHideTimer();
+  stopMainWindowAnimation();
+  if (mainWindowDockMode === 'hidden') {
+    mainWindowDockMode = 'visible';
+  }
+  clearMainWindowDragSettleTimer();
+  mainWindowDragSettleTimer = setTimeout(() => {
+    mainWindowDragSettleTimer = null;
+    if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+    syncMainWindowDockVisibility();
+  }, MAIN_WINDOW_DRAG_SUSPEND_MS + 40);
 }
 
 function isPointInsideBounds(point, bounds) {
@@ -1241,6 +1271,11 @@ function syncMainWindowDockVisibility(forceVisible = false) {
   if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) {
     return;
   }
+  if (Date.now() < mainWindowDragSuspendUntil) {
+    clearMainWindowHideTimer();
+    stopMainWindowAnimation();
+    return;
+  }
 
   const settings = getSettings();
   if (!settings.dockToEdgeEnabled || mainWindow.isMaximized()) {
@@ -1507,6 +1542,20 @@ function buildFloatingMenuPayload() {
     : '';
   const opacityRaw = Number(settings.floatingIconOpacity);
   const floatingIconOpacity = Number.isFinite(opacityRaw) ? Math.max(0.2, Math.min(1, opacityRaw)) : 1;
+  let menuCenter = null;
+  if (floatingMenuOpen) {
+    const menuBounds = getFloatingBounds('visible', true);
+    const anchor = floatingAnchorBoundsCache || getStableFloatingAnchorForMenuOpen();
+    if (menuBounds && anchor) {
+      const rawCenterX = (anchor.x + ((Number(anchor.width) || FLOATING_WINDOW_SIZE) / 2)) - menuBounds.x;
+      const rawCenterY = (anchor.y + ((Number(anchor.height) || FLOATING_WINDOW_SIZE) / 2)) - menuBounds.y;
+      const margin = 28;
+      menuCenter = {
+        x: Math.max(margin, Math.min(menuBounds.width - margin, Math.round(rawCenterX))),
+        y: Math.max(margin, Math.min(menuBounds.height - margin, Math.round(rawCenterY)))
+      };
+    }
+  }
 
   return {
     open: floatingMenuOpen,
@@ -1517,6 +1566,7 @@ function buildFloatingMenuPayload() {
     floatingIconOpacity,
     floatingIconCustomPath: customPath,
     floatingIconCustomUrl: customIconUrl,
+    menuCenter,
     recentDailyRecords: getFloatingRecentRecords('daily', 4),
     recentCommonRecords: getFloatingRecentRecords('common', 4),
     recentAssets: getFloatingRecentAssets(4)
@@ -2601,6 +2651,10 @@ function syncHoverStateFromCursor() {
   }
 
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible()) {
+    if (Date.now() < mainWindowDragSuspendUntil) {
+      clearMainWindowHideTimer();
+      return;
+    }
     const dockState = getMainWindowDockState();
     const nextMainHovered = isPointInsideBounds(cursor, mainWindow.getBounds()) || (
       !!dockState
@@ -3769,35 +3823,48 @@ function setupIpc() {
       floatingMenuWindow.setIgnoreMouseEvents(true, { forward: true });
     }
     floatingDragState = {
-      offsetX: Number(payload.offsetX) || 0,
-      offsetY: Number(payload.offsetY) || 0
+      offsetX: Math.round(Number(payload.offsetX) || 0),
+      offsetY: Math.round(Number(payload.offsetY) || 0)
     };
     return { ok: true };
   });
 
   ipcMain.handle('floating-drag-move', async (_, payload = {}) => {
     if (!floatingWindow || floatingWindow.isDestroyed() || !floatingDragState) return { ok: false };
-    const display = screen.getDisplayNearestPoint({ x: Number(payload.screenX) || 0, y: Number(payload.screenY) || 0 });
+    const screenX = Math.round(Number(payload.screenX) || 0);
+    const screenY = Math.round(Number(payload.screenY) || 0);
+    const display = screen.getDisplayNearestPoint({ x: screenX, y: screenY });
     const workArea = display.workArea;
-    const nextX = Math.min(
-      workArea.x + workArea.width - FLOATING_WINDOW_SIZE,
-      Math.max(workArea.x, (Number(payload.screenX) || 0) - floatingDragState.offsetX)
-    );
+    const settings = getSettings();
+    const rawX = screenX - floatingDragState.offsetX;
     const nextY = Math.min(
       workArea.y + workArea.height - FLOATING_WINDOW_SIZE,
-      Math.max(workArea.y, (Number(payload.screenY) || 0) - floatingDragState.offsetY)
+      Math.max(workArea.y, screenY - floatingDragState.offsetY)
     );
+    const dockEnabled = settings.dockToEdgeEnabled !== false;
+    const leftVisibleX = workArea.x;
+    const rightVisibleX = workArea.x + workArea.width - FLOATING_WINDOW_SIZE;
+    const leftHiddenX = workArea.x - FLOATING_WINDOW_SIZE + FLOATING_VISIBLE_SLIVER;
+    const rightHiddenX = workArea.x + workArea.width - FLOATING_VISIBLE_SLIVER;
+    let nextX = Math.min(rightVisibleX, Math.max(leftVisibleX, rawX));
+    if (dockEnabled) {
+      if (rawX <= workArea.x + FLOATING_EDGE_TRIGGER_SIZE) {
+        nextX = leftHiddenX;
+      } else if (rawX + FLOATING_WINDOW_SIZE >= workArea.x + workArea.width - FLOATING_EDGE_TRIGGER_SIZE) {
+        nextX = rightHiddenX;
+      }
+    }
     const nextBounds = {
-      x: nextX,
-      y: nextY,
+      x: Math.round(nextX),
+      y: Math.round(nextY),
       width: FLOATING_WINDOW_SIZE,
       height: FLOATING_WINDOW_SIZE
     };
     floatingAnchorBoundsCache = {
       ...nextBounds,
-      side: nextX + (FLOATING_WINDOW_SIZE / 2) < workArea.x + (workArea.width / 2) ? 'left' : 'right'
+      side: nextBounds.x + (FLOATING_WINDOW_SIZE / 2) < workArea.x + (workArea.width / 2) ? 'left' : 'right'
     };
-    floatingBoundsCache = { ...nextBounds, anchorX: nextX, anchorY: nextY };
+    floatingBoundsCache = { ...nextBounds, anchorX: nextBounds.x, anchorY: nextBounds.y };
     setFloatingBoundsWithTrace('floating-drag-move', nextBounds);
     if (floatingMenuOpen && floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
       const menuBounds = getFloatingBounds('visible', true);
@@ -3823,7 +3890,6 @@ function setupIpc() {
     const side = bounds.x + (FLOATING_WINDOW_SIZE / 2) < workArea.x + (workArea.width / 2) ? 'left' : 'right';
     const nextSettings = storage.saveSettings({
       ...getSettings(),
-      dockToEdgeEnabled: false,
       floatingOffsetX: Math.max(0, bounds.x - workArea.x),
       floatingDockSide: side,
       floatingOffsetY: Math.max(0, bounds.y - workArea.y)

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>悬浮菜单示例</title>
+    <style>
+        
+    </style>
+</head>
+<body>
+    <!-- <div class="content"> -->
+  <!--  -->
+        
+        <button id="show-circle-btn">显示悬浮菜单</button>
+    <!-- </div> -->
+    
+    <!-- 引入悬浮菜单脚本 -->
+    <script src="floating-menus.js"></script>
+    <script>
+        // 初始化悬浮菜单
+        document.addEventListener('DOMContentLoaded', function() {
+            // 基本用法
+            const menu = new FloatingCircleMenu({
+                smallCircleCount: 9,
+                // 其他配置...
+            });
+            // 高级用法 - 自定义配置
+            /*
+            const floatingMenu = new FloatingCircleMenu({
+                smallCircleCount: 5, // 小圆球数量
+                buttonId: 'show-circle-btn', // 触发按钮ID
+                radius: 60, // 小圆球展开半径
+                colors: ['#ff0000', '#00ff00', '#0000ff', '#ffcc00', '#ff00cc'], // 自定义颜色
+                functions: ['文件', '编辑', '视图', '工具', '帮助'], // 自定义功能名称
+                enableDblClickHide: true, // 启用双击隐藏
+                actions: {
+                    // 自定义功能实现
+                    '文件': function() {
+                        alert('文件菜单被点击');
+                    },
+                    '编辑': function() {
+                        document.body.style.filter = 'invert(1)';
+                        setTimeout(() => {
+                            document.body.style.filter = 'none';
+                        }, 500);
+                    }
+                }
+            });
+            */
+        });
+    </script>
+</body>
+</html>

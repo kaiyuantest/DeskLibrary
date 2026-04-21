@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DeskLibrary 悬浮菜单内容分配 Demo</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 20px;
+      background: #0b1220;
+      color: #dbe8ff;
+      font-family: "Microsoft YaHei UI", sans-serif;
+      display: grid;
+      place-items: center;
+    }
+    .panel {
+      width: min(820px, 96vw);
+      border: 1px solid rgba(148, 184, 246, 0.24);
+      border-radius: 14px;
+      padding: 16px;
+      background: rgba(13, 24, 45, 0.86);
+    }
+    .hint {
+      margin: 0 0 10px;
+      font-size: 13px;
+      line-height: 1.55;
+      color: #c9dbff;
+    }
+    #show-circle-btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: linear-gradient(140deg, #1f6feb, #5aa3ff);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .log {
+      margin-top: 12px;
+      height: 190px;
+      overflow: auto;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 184, 246, 0.24);
+      background: rgba(9, 16, 32, 0.72);
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+    .line { margin: 0 0 6px; word-break: break-all; }
+  </style>
+</head>
+<body>
+  <section class="panel">
+    <p class="hint">
+      第一层：主 / 存 / 常 / 始 / 译 / 资 / 更（危险项收进“更”）<br>
+      每层优先 4-6 项，超出自动归入“更多”；累计菜单随状态切换（未开始仅“开始”）。<br>
+      仅演示内容分配，不接主进程，点击后会在日志输出模拟动作。
+    </p>
+    <button id="show-circle-btn">显示悬浮菜单</button>
+    <div id="demo-log" class="log"></div>
+  </section>
+
+  <script src="floating-menu.js?v=20260421-2"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const logEl = document.getElementById("demo-log");
+
+      function log(text) {
+        const p = document.createElement("p");
+        p.className = "line";
+        p.textContent = `[${new Date().toLocaleTimeString("zh-CN", { hour12: false })}] ${text}`;
+        logEl.prepend(p);
+      }
+
+      function makeRecentDailyItems() {
+        return [
+          {
+            id: "save.item.1",
+            label: "会议要点",
+            children: [
+              { id: "save.item.1.copy", label: "复制", action: { type: "copy-text", text: "会议要点：今天完成联调并提交测试。" } },
+              { id: "save.item.1.common", label: "转常", action: { type: "move-common", title: "会议要点" } },
+              { id: "save.item.1.delete", label: "删除", action: { type: "delete-record", title: "会议要点" }, danger: true }
+            ]
+          },
+          {
+            id: "save.item.2",
+            label: "官网链接",
+            children: [
+              { id: "save.item.2.copy", label: "复制", action: { type: "copy-text", text: "https://example.com" } },
+              { id: "save.item.2.open", label: "打开", action: { type: "open-url", url: "https://example.com" } },
+              { id: "save.item.2.common", label: "转常", action: { type: "move-common", title: "官网链接" } }
+            ]
+          },
+          {
+            id: "save.item.3",
+            label: "SQL片段",
+            children: [
+              { id: "save.item.3.copy", label: "复制", action: { type: "copy-text", text: "select id,name from users where status=1 order by id desc limit 30;" } },
+              { id: "save.item.3.common", label: "转常", action: { type: "move-common", title: "SQL片段" } },
+              { id: "save.item.3.delete", label: "删除", action: { type: "delete-record", title: "SQL片段" }, danger: true }
+            ]
+          },
+          {
+            id: "save.item.4",
+            label: "排期备忘",
+            children: [
+              { id: "save.item.4.copy", label: "复制", action: { type: "copy-text", text: "周三提测，周四灰度，周五全量。" } },
+              { id: "save.item.4.common", label: "转常", action: { type: "move-common", title: "排期备忘" } },
+              { id: "save.item.4.delete", label: "删除", action: { type: "delete-record", title: "排期备忘" }, danger: true }
+            ]
+          }
+        ];
+      }
+
+      function makeRecentCommonItems() {
+        return [
+          {
+            id: "common.item.1",
+            label: "登录指引",
+            children: [
+              { id: "common.item.1.copy", label: "复制", action: { type: "copy-text", text: "登录：VPN -> SSO -> OTP -> Portal。" } },
+              { id: "common.item.1.daily", label: "回每", action: { type: "move-daily", title: "登录指引" } },
+              { id: "common.item.1.delete", label: "删除", action: { type: "delete-record", title: "登录指引" }, danger: true }
+            ]
+          },
+          {
+            id: "common.item.2",
+            label: "发版命令",
+            children: [
+              { id: "common.item.2.copy", label: "复制", action: { type: "copy-text", text: "npm run dist && npm run pack" } },
+              { id: "common.item.2.daily", label: "回每", action: { type: "move-daily", title: "发版命令" } },
+              { id: "common.item.2.delete", label: "删除", action: { type: "delete-record", title: "发版命令" }, danger: true }
+            ]
+          },
+          {
+            id: "common.item.3",
+            label: "运维后台",
+            children: [
+              { id: "common.item.3.copy", label: "复制", action: { type: "copy-text", text: "https://ops.example.com" } },
+              { id: "common.item.3.open", label: "打开", action: { type: "open-url", url: "https://ops.example.com" } },
+              { id: "common.item.3.daily", label: "回每", action: { type: "move-daily", title: "运维后台" } }
+            ]
+          },
+          {
+            id: "common.item.4",
+            label: "日报模板",
+            children: [
+              { id: "common.item.4.copy", label: "复制", action: { type: "copy-text", text: "今日进展/风险阻塞/明日计划" } },
+              { id: "common.item.4.daily", label: "回每", action: { type: "move-daily", title: "日报模板" } },
+              { id: "common.item.4.delete", label: "删除", action: { type: "delete-record", title: "日报模板" }, danger: true }
+            ]
+          }
+        ];
+      }
+
+      const tree = {
+        id: "root",
+        label: "D",
+        children: [
+          {
+            id: "main",
+            label: "主",
+            tip: "主窗口与页面导航",
+            children: [
+              { id: "main.open", label: "主窗", action: { type: "open-main-window" } },
+              {
+                id: "main.pages",
+                label: "页面",
+                children: [
+                  { id: "page.daily", label: "每日", action: { type: "goto-page", page: "daily" } },
+                  { id: "page.common", label: "常用", action: { type: "goto-page", page: "common" } },
+                  { id: "page.assets", label: "资源", action: { type: "goto-page", page: "assets" } },
+                  { id: "page.cards", label: "卡片", action: { type: "goto-page", page: "cards" } }
+                ]
+              }
+            ]
+          },
+          {
+            id: "save",
+            label: "存",
+            tip: "每日内容",
+            children: [
+              { id: "save.now", label: "立即存", action: { type: "quick-save-daily" } },
+              { id: "save.recent", label: "最近4条", children: makeRecentDailyItems() }
+            ]
+          },
+          {
+            id: "common",
+            label: "常",
+            tip: "常用内容",
+            children: [
+              { id: "common.now", label: "立即常", action: { type: "quick-save-common" } },
+              { id: "common.recent", label: "最近4条", children: makeRecentCommonItems() }
+            ]
+          },
+          {
+            id: "acc",
+            label: "始",
+            tip: "累计流程"
+          },
+          {
+            id: "ocr",
+            label: "译",
+            tip: "截图翻译",
+            children: [
+              { id: "ocr.start", label: "截图", action: { type: "ocr-start" } },
+              {
+                id: "ocr.recent",
+                label: "最近译文",
+                children: [
+                  {
+                    id: "ocr.recent.1",
+                    label: "译文1",
+                    children: [
+                      { id: "ocr.recent.1.copy", label: "复制", action: { type: "copy-text", text: "Please verify deployment window and rollback plan." } },
+                      { id: "ocr.recent.1.reopen", label: "重开", action: { type: "ocr-start" } }
+                    ]
+                  },
+                  {
+                    id: "ocr.recent.2",
+                    label: "译文2",
+                    children: [
+                      { id: "ocr.recent.2.copy", label: "复制", action: { type: "copy-text", text: "本周发版窗口调整为周四 20:00-21:00。" } },
+                      { id: "ocr.recent.2.reopen", label: "重开", action: { type: "ocr-start" } }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            id: "assets",
+            label: "资",
+            tip: "资源快捷入口",
+            children: [
+              {
+                id: "assets.shortcut",
+                label: "快捷入口",
+                children: [
+                  {
+                    id: "assets.shortcut.project",
+                    label: "项目目录",
+                    children: [
+                      { id: "assets.shortcut.project.open", label: "打开", action: { type: "open-path", path: "E:\\project\\Click2Save" } },
+                      { id: "assets.shortcut.project.copy", label: "复制路径", action: { type: "copy-text", text: "E:\\project\\Click2Save" } }
+                    ]
+                  },
+                  {
+                    id: "assets.shortcut.repo",
+                    label: "仓库主页",
+                    children: [
+                      { id: "assets.shortcut.repo.open", label: "打开", action: { type: "open-url", url: "https://github.com/kaiyuantest/click2save-electron" } },
+                      { id: "assets.shortcut.repo.copy", label: "复制链接", action: { type: "copy-text", text: "https://github.com/kaiyuantest/click2save-electron" } }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            id: "more",
+            label: "更",
+            tip: "低频和危险操作",
+            children: [
+              {
+                id: "more.browser",
+                label: "浏览器",
+                children: [
+                  {
+                    id: "more.browser.card1",
+                    label: "shop工作号",
+                    children: [
+                      { id: "more.browser.card1.open", label: "打开", action: { type: "open-url", url: "https://shop.demo.example" } },
+                      { id: "more.browser.card1.test", label: "测试", action: { type: "card-test", target: "shop.demo.example" } },
+                      { id: "more.browser.card1.inject", label: "注入", action: { type: "card-inject", target: "shop.demo.example" } }
+                    ]
+                  },
+                  {
+                    id: "more.browser.card2",
+                    label: "portal运营号",
+                    children: [
+                      { id: "more.browser.card2.open", label: "打开", action: { type: "open-url", url: "https://portal.demo.example" } },
+                      { id: "more.browser.card2.test", label: "测试", action: { type: "card-test", target: "portal.demo.example" } },
+                      { id: "more.browser.card2.inject", label: "注入", action: { type: "card-inject", target: "portal.demo.example" } }
+                    ]
+                  }
+                ]
+              },
+              {
+                id: "more.delete",
+                label: "删除",
+                children: [
+                  { id: "more.delete.last", label: "删上次", action: { type: "delete-last" }, danger: true },
+                  {
+                    id: "more.delete.pick",
+                    label: "按项删",
+                    children: [
+                      { id: "more.delete.pick.1", label: "日报草稿", action: { type: "delete-record", title: "日报草稿" }, danger: true },
+                      { id: "more.delete.pick.2", label: "测试命令", action: { type: "delete-record", title: "测试命令" }, danger: true },
+                      { id: "more.delete.pick.3", label: "临时便签", action: { type: "delete-record", title: "临时便签" }, danger: true }
+                    ]
+                  }
+                ]
+              },
+              {
+                id: "more.settings",
+                label: "设置",
+                children: []
+              },
+              {
+                id: "more.hide",
+                label: "隐藏",
+                children: [
+                  { id: "more.hide.confirm", label: "确认", action: { type: "hide-floating" }, danger: true },
+                  { id: "more.hide.cancel", label: "取消", action: { type: "noop", message: "已取消关闭" } }
+                ]
+              }
+            ]
+          }
+        ]
+      };
+
+      const menu = new FloatingCircleMenu({
+        buttonId: "show-circle-btn",
+        tree: tree,
+        maxNodesPerLayer: 6,
+        onAction: function (payload) {
+          const label = payload && payload.node ? payload.node.label : "(unknown)";
+          const type = payload && payload.action ? payload.action.type : "unknown";
+          log(`执行 ${label} / ${type} -> ${payload.message}`);
+        }
+      });
+
+      log("初始化完成：新内容分配已加载（高频前置、危险项归入“更”、累计状态切换）。");
+      window.__xxiaoqiuMenu = menu;
+    });
+  </script>
+</body>
+</html>

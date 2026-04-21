@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>悬浮圈层菜单 Demo</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: "Microsoft YaHei UI", sans-serif;
+      color: #e6efff;
+      background:
+        radial-gradient(circle at 20% 20%, rgba(74, 119, 214, 0.25), transparent 45%),
+        radial-gradient(circle at 80% 80%, rgba(38, 85, 183, 0.25), transparent 45%),
+        #0b1220;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+    }
+    .panel {
+      width: min(760px, 96vw);
+      border: 1px solid rgba(141, 176, 239, 0.25);
+      background: rgba(11, 18, 32, 0.78);
+      backdrop-filter: blur(4px);
+      border-radius: 14px;
+      padding: 18px 18px 14px;
+      box-shadow: 0 18px 40px rgba(8, 16, 33, 0.45);
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 20px;
+      font-weight: 700;
+    }
+    p {
+      margin: 0 0 12px;
+      line-height: 1.6;
+      color: #c8d8f8;
+      font-size: 14px;
+    }
+    .tips {
+      margin: 0 0 14px;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 184, 246, 0.26);
+      background: rgba(34, 63, 122, 0.24);
+      font-size: 13px;
+      color: #d7e5ff;
+      line-height: 1.5;
+    }
+    #show-circle-btn {
+      border: 0;
+      border-radius: 10px;
+      padding: 10px 14px;
+      background: linear-gradient(140deg, #1f6feb, #5aa3ff);
+      color: #fff;
+      cursor: pointer;
+      font-weight: 700;
+      font-size: 14px;
+    }
+    .log {
+      margin-top: 14px;
+      padding: 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 184, 246, 0.24);
+      background: rgba(14, 25, 44, 0.6);
+      height: 180px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.45;
+      color: #d6e5ff;
+    }
+    .log-line {
+      margin: 0 0 6px;
+      word-break: break-all;
+      opacity: 0.96;
+    }
+    code {
+      padding: 1px 4px;
+      border-radius: 5px;
+      background: rgba(108, 151, 225, 0.2);
+      color: #eaf2ff;
+    }
+  </style>
+</head>
+<body>
+  <section class="panel">
+    <h1>悬浮图标圈层菜单</h1>
+    <p>第一圈保留 7 个功能：主 / 存 / 常 / 删 / 始 / 译 / 隐。支持 1-X 层，最底层（叶子）才执行动作。</p>
+    <div class="tips">
+      交互说明：点击或触摸按钮显示悬浮菜单。每次点击进入下一层，直到叶子节点执行动作。<br>
+      中心球：返回上一级；根层点击中心球关闭。中心球双击也会关闭。<br>
+      Demo 已包含复制文本、打开网址、打开路径、浏览器卡片测试/注入、累计流程等示例动作。
+    </div>
+    <button id="show-circle-btn" type="button">显示悬浮菜单</button>
+    <div id="demo-log" class="log"></div>
+  </section>
+
+  <script src="floating-menu.js"></script>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      const logEl = document.getElementById("demo-log");
+      function appendLog(text) {
+        const p = document.createElement("p");
+        p.className = "log-line";
+        const time = new Date().toLocaleTimeString("zh-CN", { hour12: false });
+        p.innerHTML = `<code>${time}</code> ${text}`;
+        logEl.prepend(p);
+      }
+
+      const menu = new FloatingCircleMenu({
+        buttonId: "show-circle-btn",
+        onAction: (payload) => {
+          const nodeLabel = payload?.node?.label || "(unknown)";
+          const actionType = payload?.action?.type || "unknown";
+          appendLog(`执行 <b>${nodeLabel}</b> / <b>${actionType}</b>：${payload.message}`);
+        }
+      });
+
+      appendLog("菜单初始化完成。请点击按钮后逐层进入，直到叶子动作执行。");
+      window.__floatingMenuDemo = menu;
+    });
+  </script>
+</body>
+</html>

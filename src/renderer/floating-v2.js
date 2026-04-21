@@ -367,6 +367,21 @@ class FloatingCircleMenu {
     this.center.textContent = '';
   }
 
+  setViewportCenter(point = null) {
+    const width = Math.max(1, Math.round(window.innerWidth || 1));
+    const height = Math.max(1, Math.round(window.innerHeight || 1));
+    if (!point || !Number.isFinite(Number(point.x)) || !Number.isFinite(Number(point.y))) {
+      this.root.style.left = '50%';
+      this.root.style.top = '50%';
+      return;
+    }
+    const margin = 28;
+    const x = Math.max(margin, Math.min(width - margin, Math.round(Number(point.x))));
+    const y = Math.max(margin, Math.min(height - margin, Math.round(Number(point.y))));
+    this.root.style.left = `${x}px`;
+    this.root.style.top = `${y}px`;
+  }
+
   renderLayer(depth, nodes) {
     const layer = document.createElement('div');
     layer.className = 'fm-ring-layer';
@@ -758,7 +773,7 @@ function buildMenuTree(payload = {}) {
       {
         id: 'main',
         label: '主',
-        tip: '主窗口与页面导航',
+        tip: '主界面',
         children: [
           { id: 'main.open', label: '主窗', action: { type: 'open-main-window' } },
           {
@@ -1163,6 +1178,7 @@ const menu = new FloatingCircleMenu({
 
 function applyMenuState(payload = {}) {
   latestPayload = payload || {};
+  menu.setViewportCenter(latestPayload.menuCenter || null);
   const nextSignature = JSON.stringify({
     acc: !!(latestPayload.accumulation && latestPayload.accumulation.active),
     lastCapture: latestPayload.lastCapture && latestPayload.lastCapture.preview ? latestPayload.lastCapture.preview : '',
