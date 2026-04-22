@@ -1,0 +1,11 @@
+{
+  "name": "desklibrary-next",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Next-generation local vault implementation for DeskLibrary",
+  "scripts": {
+    "smoke:vault": "node scripts/vault-smoke-test.js",
+    "inspect:vault": "node scripts/inspect-vault.js",
+    "start:desktop": "node scripts/start-desktop.js"
+  }
+}

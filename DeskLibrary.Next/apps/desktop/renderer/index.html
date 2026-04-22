@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeskLibrary.Next</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="hero">
+        <div class="hero-copy">
+          <p class="eyebrow">DeskLibrary.Next Desktop</p>
+          <h1>以 Vault 文件夹为主系统启动</h1>
+          <p class="subline">
+            这个桌面壳直接围绕 `NextVault` 工作。打包后的 EXE 也应围绕同一套目录协议，让 AI 和软件都面向这个文件夹操作。
+          </p>
+        </div>
+        <div class="hero-actions">
+          <button id="refreshBtn" class="primary-btn">刷新</button>
+          <button id="selectVaultBtn" class="secondary-btn">切换 Vault</button>
+          <button id="openVaultBtn" class="secondary-btn">打开数据目录</button>
+        </div>
+      </section>
+
+      <section class="status-grid">
+        <article class="status-card">
+          <div class="label">当前 Vault</div>
+          <div id="vaultPath" class="value path"></div>
+        </article>
+        <article class="status-card">
+          <div class="label">显示名称</div>
+          <div id="vaultName" class="value"></div>
+        </article>
+        <article class="status-card">
+          <div class="label">格式版本</div>
+          <div id="formatVersion" class="value"></div>
+        </article>
+      </section>
+
+      <section class="counts-grid" id="countsGrid"></section>
+
+      <section class="panel-grid">
+        <article class="panel">
+          <div class="panel-head">
+            <h2>文本记录</h2>
+            <span id="recordsCount" class="pill"></span>
+          </div>
+          <div id="recordsList" class="list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>图片记录</h2>
+            <span id="imagesCount" class="pill"></span>
+          </div>
+          <div id="imagesList" class="image-list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>资源文件</h2>
+            <span id="filesCount" class="pill"></span>
+          </div>
+          <div id="filesList" class="list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-head">
+            <h2>浏览器卡片</h2>
+            <span id="cardsCount" class="pill"></span>
+          </div>
+          <div id="cardsList" class="list"></div>
+        </article>
+      </section>
+    </main>
+
+    <script src="./renderer.js"></script>
+  </body>
+  </html>

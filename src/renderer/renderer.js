@@ -90,6 +90,11 @@ const els = {
   aboutFeedbackSubmitBtn: document.getElementById('aboutFeedbackSubmitBtn'),
   aboutFeedbackStatus: document.getElementById('aboutFeedbackStatus'),
   dailySearchInput: document.getElementById('dailySearchInput'),
+  aiQueryInput: document.getElementById('aiQueryInput'),
+  aiQueryBtn: document.getElementById('aiQueryBtn'),
+  aiQueryPanel: document.getElementById('aiQueryPanel'),
+  aiQuerySummary: document.getElementById('aiQuerySummary'),
+  aiQueryResults: document.getElementById('aiQueryResults'),
   imageOnlyToggle: document.getElementById('imageOnlyToggle'),
   sourceFilterSelect: document.getElementById('sourceFilterSelect'),
   dailyDatePicker: document.getElementById('dailyDatePicker'),
@@ -2295,6 +2300,64 @@ function switchPage(page) {
   render();
 }
 
+function renderAiQueryResults(result) {
+  if (!els.aiQueryPanel || !els.aiQuerySummary || !els.aiQueryResults) return;
+
+  if (!result) {
+    els.aiQueryPanel.classList.add('hidden');
+    els.aiQuerySummary.textContent = '未查询';
+    els.aiQueryResults.innerHTML = '';
+    return;
+  }
+
+  els.aiQueryPanel.classList.remove('hidden');
+
+  if (!result.ok) {
+    els.aiQuerySummary.textContent = '查询失败';
+    els.aiQueryResults.innerHTML = `<article class="ai-result-card"><div class="ai-result-title">${escapeHtml(result.message || '查询失败')}</div></article>`;
+    return;
+  }
+
+  const totals = result.totals || {};
+  els.aiQuerySummary.textContent = `共 ${totals.all || 0} 条 · 文本 ${totals.records || 0} · 图片 ${totals.images || 0} · 文件 ${totals.files || 0} · 卡片 ${totals.browserCards || 0}`;
+
+  if (!result.results || !result.results.length) {
+    els.aiQueryResults.innerHTML = '<article class="ai-result-card"><div class="ai-result-title">没有命中项</div><div class="ai-result-preview">换一个关键词再试。</div></article>';
+    return;
+  }
+
+  els.aiQueryResults.innerHTML = result.results.map((item) => `
+    <article class="ai-result-card">
+      <div class="ai-result-type">${escapeHtml(item.type)}</div>
+      <div class="ai-result-title">${escapeHtml(item.title)}</div>
+      <div class="ai-result-preview">${escapeHtml(item.preview || '')}</div>
+      <div class="ai-result-meta">${escapeHtml(item.meta || '')}</div>
+    </article>
+  `).join('');
+}
+
+async function runAiQuery() {
+  const keyword = String(els.aiQueryInput?.value || '').trim();
+  if (!keyword) {
+    renderAiQueryResults({
+      ok: true,
+      totals: { all: 0, records: 0, images: 0, files: 0, browserCards: 0 },
+      results: []
+    });
+    return;
+  }
+
+  if (els.aiQueryPanel) {
+    els.aiQueryPanel.classList.remove('hidden');
+  }
+  if (els.aiQuerySummary) {
+    els.aiQuerySummary.textContent = '查询中...';
+  }
+
+  const result = await window.deskLibrary.queryNextVault(keyword);
+  renderAiQueryResults(result);
+}
+
 function setRecordMultiSelectMode(enabled) {
   state.recordMultiSelectMode = !!enabled;
   if (!state.recordMultiSelectMode) {
@@ -2701,6 +2764,15 @@ els.windowCloseBtn.addEventListener('click', () => window.deskLibrary.closeWindo
 
 els.refreshBtn.addEventListener('click', async () => {
   applySnapshot(await window.deskLibrary.getInitialData());
+});
+els.aiQueryBtn?.addEventListener('click', async () => {
+  await runAiQuery();
+});
+els.aiQueryInput?.addEventListener('keydown', async (event) => {
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    await runAiQuery();
+  }
 });
 els.mobileRefreshBtn?.addEventListener('click', async () => {
   applySnapshot(await window.deskLibrary.getInitialData());

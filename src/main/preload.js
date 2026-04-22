@@ -2,6 +2,8 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('deskLibrary', {
   getInitialData: () => ipcRenderer.invoke('get-initial-data'),
+  getNextVaultStatus: () => ipcRenderer.invoke('get-next-vault-status'),
+  queryNextVault: (keyword) => ipcRenderer.invoke('query-next-vault', keyword),
   saveSettings: (settings) => ipcRenderer.invoke('save-settings', settings),
   resetSettings: () => ipcRenderer.invoke('reset-settings'),
   createManualTextRecord: (text) => ipcRenderer.invoke('create-manual-text-record', text),

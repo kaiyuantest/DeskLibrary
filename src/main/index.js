@@ -1,6 +1,7 @@
 const { execFileSync } = require('child_process');
 const { app, BrowserWindow, Tray, Menu, globalShortcut, clipboard, nativeImage, ipcMain, Notification, shell, screen, dialog, desktopCapturer } = require('electron');
 const fs = require('fs');
+const fsp = require('fs/promises');
 const http = require('http');
 const https = require('https');
 const path = require('path');
@@ -8,6 +9,7 @@ const { pathToFileURL } = require('url');
 const { StorageService } = require('./storage');
 const { getDefaultSelfBuiltRoot, normalizeSelfBuiltRoot, openBrowserCard, runPythonBridge, scanBrowserCards } = require('./browser-import');
 const { listSelfBuiltProfiles } = require('./browser-node-service');
+const { createLegacyIngestBridge } = require('./next-vault/ingest/legacy-bridge');
 let uIOhook = null;
 try {
   const hookModule = require('uiohook-napi');
@@ -58,6 +60,7 @@ let screenshotResultWindow = null;
 let lastScreenshotResultPayload = null;
 let tray = null;
 let storage = null;
+let legacyIngestBridge = null;
 let lastClipboardSignature = '';
 let ignoreNextClipboardChange = false;
 let pendingPayload = null;
@@ -96,9 +99,761 @@ let mainWindowDragSettleTimer = null;
 let hoverSyncTimer = null;
 let registeredGlobalAccelerators = [];
 let hotkeyWarningText = '';
+let legacyIngestBridgeState = {
+  enabled: true,
+  ready: false,
+  rootPath: '',
+  lastError: ''
+};
 
 function getApiConfigPath() {
   return path.join(app.getPath('userData'), 'api-config.json');
+}
+
+function getNextVaultRootPath() {
+  const override = String(process.env.DESKLIBRARY_NEXT_VAULT_PATH || '').trim();
+  return override || path.join(app.getPath('documents'), 'DeskLibrary.NextVault');
+}
+
+function getLegacyNextVaultRootPath() {
+  return path.join(app.getPath('userData'), 'DeskLibrary.NextVault');
+}
+
+async function pathExistsAsync(targetPath) {
+  try {
+    await fsp.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function copyDirectoryRecursive(sourcePath, targetPath) {
+  const stats = await fsp.stat(sourcePath);
+  if (stats.isDirectory()) {
+    await fsp.mkdir(targetPath, { recursive: true });
+    const entries = await fsp.readdir(sourcePath, { withFileTypes: true });
+    for (const entry of entries) {
+      await copyDirectoryRecursive(
+        path.join(sourcePath, entry.name),
+        path.join(targetPath, entry.name)
+      );
+    }
+    return;
+  }
+
+  await fsp.mkdir(path.dirname(targetPath), { recursive: true });
+  await fsp.copyFile(sourcePath, targetPath);
+}
+
+async function migrateNextVaultIfNeeded() {
+  const preferredPath = getNextVaultRootPath();
+  const legacyPath = getLegacyNextVaultRootPath();
+
+  if (preferredPath === legacyPath) {
+    return preferredPath;
+  }
+
+  const preferredExists = await pathExistsAsync(path.join(preferredPath, 'vault.json'));
+  if (preferredExists) {
+    return preferredPath;
+  }
+
+  const legacyExists = await pathExistsAsync(path.join(legacyPath, 'vault.json'));
+  if (!legacyExists) {
+    return preferredPath;
+  }
+
+  await copyDirectoryRecursive(legacyPath, preferredPath);
+  return preferredPath;
+}
+
+function isNextVaultReadEnabled() {
+  const raw = String(process.env.DESKLIBRARY_NEXT_VAULT_READ || '').trim().toLowerCase();
+  if (!raw) {
+    return true;
+  }
+  return !['0', 'false', 'no', 'off'].includes(raw);
+}
+
+function isNextVaultMirrorEnabled() {
+  const raw = String(process.env.DESKLIBRARY_NEXT_VAULT_DISABLE_MIRROR || '').trim().toLowerCase();
+  return !['1', 'true', 'yes', 'on'].includes(raw);
+}
+
+async function initLegacyIngestBridge() {
+  const rootPath = await migrateNextVaultIfNeeded();
+  legacyIngestBridgeState = {
+    enabled: isNextVaultMirrorEnabled(),
+    ready: false,
+    rootPath,
+    lastError: ''
+  };
+
+  if (!legacyIngestBridgeState.enabled) {
+    legacyIngestBridge = null;
+    return;
+  }
+
+  try {
+    legacyIngestBridge = await createLegacyIngestBridge({
+      vaultRootPath: legacyIngestBridgeState.rootPath,
+      displayName: 'DeskLibrary Next Vault',
+      defaultLanguage: 'zh-CN',
+      capabilities: {
+        supportsClipboardCapture: true,
+        supportsCloudAi: true,
+        supportsVisionSearch: true
+      }
+    });
+    legacyIngestBridgeState.ready = true;
+  } catch (error) {
+    legacyIngestBridge = null;
+    legacyIngestBridgeState.ready = false;
+    legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+    console.error('Legacy ingest bridge init failed:', error);
+  }
+}
+
+function mirrorPayloadToNextVault(payload, method, options = {}) {
+  if (!legacyIngestBridge || !payload) return;
+
+  legacyIngestBridge
+    .ingestClipboardPayload(payload, {
+      captureMethod: method || 'manual',
+      category: options.category === 'common' ? 'common' : 'daily',
+      sourceContext: options.sourceContext || {},
+      sourceType: 'clipboard'
+    })
+    .catch((error) => {
+      legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+      console.error('Mirror clipboard payload to next vault failed:', error);
+    });
+}
+
+function mirrorTextToNextVault(text, options = {}) {
+  if (!legacyIngestBridge) return;
+  const normalizedText = String(text || '').replace(/\r\n/g, '\n').trim();
+  if (!normalizedText) return;
+
+  legacyIngestBridge
+    .ingestTextRecord(normalizedText, {
+      captureMethod: options.captureMethod || 'manual',
+      category: options.category === 'common' ? 'common' : 'daily',
+      sourceType: options.sourceType || 'manual',
+      sourceApp: options.sourceApp || '',
+      windowTitle: options.windowTitle || ''
+    })
+    .catch((error) => {
+      legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+      console.error('Mirror text record to next vault failed:', error);
+    });
+}
+
+async function mirrorAssetsToNextVault(paths = [], mode = 'link') {
+  if (!legacyIngestBridge) return;
+  const normalizedPaths = Array.isArray(paths) ? paths.filter(Boolean) : [];
+  if (!normalizedPaths.length) return;
+
+  try {
+    await legacyIngestBridge.importAssets({
+      mode,
+      paths: normalizedPaths
+    });
+  } catch (error) {
+    legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+    console.error('Mirror assets to next vault failed:', error);
+  }
+}
+
+async function mirrorBrowserCardsToNextVault(cards = []) {
+  if (!legacyIngestBridge) return;
+  const normalizedCards = Array.isArray(cards) ? cards : [];
+  if (!normalizedCards.length) return;
+
+  try {
+    await legacyIngestBridge.importBrowserCards({
+      cards: normalizedCards
+    });
+  } catch (error) {
+    legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+    console.error('Mirror browser cards to next vault failed:', error);
+  }
+}
+
+function getNextVaultMirrorStatus() {
+  return {
+    ...legacyIngestBridgeState,
+    ready: Boolean(legacyIngestBridge),
+    rootPath: legacyIngestBridgeState.rootPath || getNextVaultRootPath(),
+    readEnabled: isNextVaultReadEnabled()
+  };
+}
+
+function resolveNextVaultStoredPath(rawPath = '') {
+  const clean = String(rawPath || '').trim();
+  if (!clean || !legacyIngestBridge?.vault?.rootPath) {
+    return '';
+  }
+  return path.isAbsolute(clean) ? clean : path.join(legacyIngestBridge.vault.rootPath, clean);
+}
+
+function getConfiguredAssetBackupRoot() {
+  const raw = String(getSettings().assetBackupPath || '').trim();
+  return raw ? path.resolve(raw) : '';
+}
+
+function normalizeSearchText(value) {
+  return String(value || '').toLowerCase().trim();
+}
+
+function includesSearch(haystack, needle) {
+  return normalizeSearchText(haystack).includes(needle);
+}
+
+async function queryNextVault(keyword = '') {
+  if (!legacyIngestBridge?.vault?.objects) {
+    return {
+      ok: false,
+      message: 'NextVault 未初始化'
+    };
+  }
+
+  const needle = normalizeSearchText(keyword);
+  if (!needle) {
+    return {
+      ok: true,
+      keyword: '',
+      totals: {
+        all: 0,
+        records: 0,
+        images: 0,
+        files: 0,
+        browserCards: 0
+      },
+      results: []
+    };
+  }
+
+  const [records, images, files, cards] = await Promise.all([
+    legacyIngestBridge.vault.objects.listRecords(),
+    legacyIngestBridge.vault.objects.listImageAssets(),
+    legacyIngestBridge.vault.objects.listFileAssets(),
+    legacyIngestBridge.vault.objects.listBrowserCards()
+  ]);
+
+  const recordResults = records
+    .filter((record) => includesSearch(record.text, needle) || includesSearch(record.note, needle))
+    .map((record) => ({
+      type: 'record',
+      id: record.id,
+      title: (record.text || '').split(/\r?\n/)[0] || '空文本',
+      preview: (record.text || '').slice(0, 180),
+      meta: `${record?.source?.app || '未知来源'} · ${record.updatedAt || record.createdAt || ''}`
+    }));
+
+  const imageResults = images
+    .filter((image) => {
+      const labels = Array.isArray(image?.vision?.labels) ? image.vision.labels.join(' ') : '';
+      return (
+        includesSearch(image?.vision?.caption, needle) ||
+        includesSearch(image?.vision?.ocrText, needle) ||
+        includesSearch(labels, needle) ||
+        includesSearch(image?.note, needle) ||
+        includesSearch(image?.file?.name, needle)
+      );
+    })
+    .map((image) => ({
+      type: 'image',
+      id: image.id,
+      title: image?.file?.name || image.id,
+      preview: image?.vision?.caption || image?.vision?.ocrText || '',
+      meta: `${image?.source?.app || '未知来源'} · ${image.updatedAt || image.createdAt || ''}`
+    }));
+
+  const fileResults = files
+    .filter((file) => {
+      const text = [
+        file.name,
+        file.note,
+        file.extension,
+        file?.paths?.sourcePath,
+        file?.paths?.storedPath,
+        file?.paths?.primaryPath
+      ].join(' ');
+      return includesSearch(text, needle);
+    })
+    .map((file) => ({
+      type: 'file',
+      id: file.id,
+      title: file.name || file.id,
+      preview: file?.paths?.primaryPath || file?.paths?.sourcePath || '',
+      meta: `${file.mode || 'link'} · ${file.entryType || 'file'}`
+    }));
+
+  const cardResults = cards
+    .filter((card) => {
+      const text = [
+        card.name,
+        card.domain,
+        card.openUrl,
+        card.username,
+        card.remark,
+        ...(Array.isArray(card.cookieNames) ? card.cookieNames : [])
+      ].join(' ');
+      return includesSearch(text, needle);
+    })
+    .map((card) => ({
+      type: 'browser_card',
+      id: card.id,
+      title: card.name || card.domain || card.id,
+      preview: card.domain || '',
+      meta: `${card?.browserSource?.type || 'unknown'} · ${card.updatedAt || card.createdAt || ''}`
+    }));
+
+  const results = [...recordResults, ...imageResults, ...fileResults, ...cardResults].slice(0, 50);
+
+  return {
+    ok: true,
+    keyword,
+    totals: {
+      all: results.length,
+      records: recordResults.length,
+      images: imageResults.length,
+      files: fileResults.length,
+      browserCards: cardResults.length
+    },
+    results
+  };
+}
+
+function formatLocalDateString(value) {
+  const date = value ? new Date(value) : new Date();
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildDateFiltersFromRecords(records = []) {
+  return ['全部', ...new Set(records.map((item) => item.createdDate).filter(Boolean))];
+}
+
+async function readImageDataUrlFromVault(relativePath = '') {
+  const clean = String(relativePath || '').trim();
+  if (!clean || !legacyIngestBridge?.vault?.rootPath) return '';
+  const absolutePath = path.join(legacyIngestBridge.vault.rootPath, clean);
+  try {
+    const buffer = await fsp.readFile(absolutePath);
+    const ext = path.extname(absolutePath).toLowerCase();
+    const mimeType = ext === '.jpg' || ext === '.jpeg'
+      ? 'image/jpeg'
+      : ext === '.webp'
+        ? 'image/webp'
+        : ext === '.bmp'
+          ? 'image/bmp'
+          : 'image/png';
+    return `data:${mimeType};base64,${buffer.toString('base64')}`;
+  } catch {
+    return '';
+  }
+}
+
+function getVaultBrowserSourceKey(browserSource = {}) {
+  const type = browserSource.type || '';
+  const userDataDir = browserSource.userDataDir || browserSource.user_data_dir || '';
+  const profileName = browserSource.profileName || browserSource.profile_name || '';
+  const browserId = browserSource.browserId || browserSource.browser_id || '';
+  const label = browserSource.label || browserSource.displayName || browserSource.display_name || browserSource.name || '';
+  if (type === 'chrome_profile') {
+    return `chrome_profile:${userDataDir}:${profileName || label}`;
+  }
+  if (type === 'self_built') {
+    return `self_built:${userDataDir || label}`;
+  }
+  return `${type || 'unknown'}:${browserId || label}`;
+}
+
+async function buildNextVaultSnapshot() {
+  if (!legacyIngestBridge?.vault?.objects) {
+    return null;
+  }
+
+  const [vaultRecords, vaultImages, vaultFiles, vaultCards] = await Promise.all([
+    legacyIngestBridge.vault.objects.listRecords(),
+    legacyIngestBridge.vault.objects.listImageAssets(),
+    legacyIngestBridge.vault.objects.listFileAssets(),
+    legacyIngestBridge.vault.objects.listBrowserCards()
+  ]);
+
+  const mappedTextRecords = vaultRecords.map((record, index) => ({
+    id: 100000 + index,
+    nextVaultId: record.id,
+    contentType: 'text',
+    textContent: record.text || '',
+    imagePath: '',
+    imageDataUrl: '',
+    contentHash: record?.stats?.contentHash || '',
+    captureMethod: record?.capture?.method || 'manual',
+    category: record?.capture?.category || 'daily',
+    hitCount: Number(record?.stats?.hitCount || 1),
+    lastCapturedAt: record.updatedAt || record.createdAt || '',
+    sourceApp: record?.source?.app || '',
+    windowTitle: record?.source?.windowTitle || '',
+    editableNote: record.note || '',
+    createdAt: record.createdAt,
+    createdDate: formatLocalDateString(record.createdAt),
+    updatedAt: record.updatedAt,
+    source: 'next-vault'
+  }));
+
+  const mappedImageRecords = await Promise.all(
+    vaultImages.map(async (image, index) => ({
+      id: 200000 + index,
+      nextVaultId: image.id,
+      contentType: 'image',
+      textContent: '',
+      imagePath: path.join(legacyIngestBridge.vault.rootPath, image?.file?.path || ''),
+      imageDataUrl: await readImageDataUrlFromVault(image?.file?.path || ''),
+      contentHash: image?.hash?.sha256 || '',
+      captureMethod: image?.capture?.method || 'manual',
+      category: image?.capture?.category || 'daily',
+      hitCount: Number(image?.stats?.hitCount || 1),
+      lastCapturedAt: image.updatedAt || image.createdAt || '',
+      sourceApp: image?.source?.app || '',
+      windowTitle: image?.source?.windowTitle || '',
+      editableNote: image.note || '',
+      createdAt: image.createdAt,
+      createdDate: formatLocalDateString(image.createdAt),
+      updatedAt: image.updatedAt,
+      source: 'next-vault'
+    }))
+  );
+
+  const records = [...mappedTextRecords, ...mappedImageRecords].sort((a, b) => {
+    const timeA = new Date(a.updatedAt || a.createdAt || 0).getTime();
+    const timeB = new Date(b.updatedAt || b.createdAt || 0).getTime();
+    return timeB - timeA;
+  });
+
+  const assets = vaultFiles
+    .map((asset, index) => {
+      const sourcePath = asset?.paths?.sourcePath || '';
+      const storedPath = asset?.paths?.storedPath
+        ? resolveNextVaultStoredPath(asset.paths.storedPath)
+        : '';
+      const primaryPath = asset?.paths?.primaryPath
+        ? (asset.mode === 'backup'
+          ? resolveNextVaultStoredPath(asset.paths.primaryPath)
+          : asset.paths.primaryPath)
+        : '';
+      return {
+        id: 300000 + index,
+        nextVaultId: asset.id,
+        entryType: asset.entryType || 'file',
+        mode: asset.mode || 'link',
+        name: asset.name || '',
+        extension: asset.extension || '',
+        sourcePath,
+        storedPath,
+        primaryPath,
+        note: asset.note || '',
+        createdAt: asset.createdAt,
+        updatedAt: asset.updatedAt,
+        isImage: ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg'].includes((asset.extension || '').toLowerCase()),
+        exists: asset?.state?.exists !== false,
+        sourceExists: asset?.state?.sourceExists !== false,
+        backupExists: !!storedPath
+      };
+    })
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime());
+
+  const browserCards = vaultCards
+    .map((card) => ({
+      id: card.id,
+      name: card.name || '',
+      domain: card.domain || '',
+      openUrl: card.openUrl || '',
+      open_url: card.openUrl || '',
+      url: card?.extra?.url || card.openUrl || '',
+      cookies: Array.isArray(card.cookies) ? card.cookies : [],
+      cookieNames: Array.isArray(card.cookieNames) ? card.cookieNames : [],
+      cookieCount: Number(card?.extra?.cookieCount || (Array.isArray(card.cookies) ? card.cookies.length : 0)),
+      remark: card.remark || '',
+      username: card.username || '',
+      password: card.password || '',
+      saved_at: card?.extra?.savedAt || card.createdAt || '',
+      last_used_at: card?.extra?.lastUsedAt || '',
+      last_used_method: card?.extra?.lastUsedMethod || '',
+      test_title: card?.extra?.testTitle || '',
+      test_ok: typeof card?.extra?.testOk === 'boolean' ? card.extra.testOk : null,
+      browserSource: card.browserSource || {},
+      sourceType: card?.extra?.sourceType || card?.browserSource?.type || 'unknown',
+      sourceLabel: card?.extra?.sourceLabel || card?.browserSource?.displayName || card?.browserSource?.profileName || '',
+      sourceKey: card?.extra?.sourceKey || getVaultBrowserSourceKey(card.browserSource || {}),
+      createdAt: card.createdAt,
+      updatedAt: card.updatedAt
+    }))
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0).getTime() - new Date(a.updatedAt || a.createdAt || 0).getTime());
+
+  return {
+    records: records.map(normalizeRecord),
+    assets: assets.map(normalizeAsset),
+    browserCards: browserCards.map(normalizeBrowserCard),
+    dateFilters: buildDateFiltersFromRecords(records),
+    categoryFilters: ['全部', '常用', '每日'],
+    settings: getSettings(),
+    statusText: '后台监听中（NextVault）'
+  };
+}
+
+async function buildNextVaultUiMaps() {
+  if (!isNextVaultReadEnabled() || !legacyIngestBridge?.vault?.objects) {
+    return null;
+  }
+
+  const snapshot = await buildNextVaultSnapshot();
+  if (!snapshot) {
+    return null;
+  }
+
+  return {
+    snapshot,
+    records: new Map((snapshot.records || []).map((item) => [String(item.id), item])),
+    assets: new Map((snapshot.assets || []).map((item) => [String(item.id), item])),
+    browserCards: new Map((snapshot.browserCards || []).map((item) => [String(item.id), item]))
+  };
+}
+
+async function findNextVaultRecordByUiId(uiId) {
+  const lookup = await buildNextVaultUiMaps();
+  const uiRecord = lookup?.records?.get(String(uiId)) || null;
+  if (!uiRecord?.nextVaultId || !legacyIngestBridge?.vault?.objects) {
+    return null;
+  }
+
+  if (uiRecord.contentType === 'image') {
+    const image = await legacyIngestBridge.vault.objects.getImageAsset(uiRecord.nextVaultId);
+    return image ? { uiRecord, kind: 'image', object: image } : null;
+  }
+
+  const record = await legacyIngestBridge.vault.objects.getRecord(uiRecord.nextVaultId);
+  return record ? { uiRecord, kind: 'text', object: record } : null;
+}
+
+async function findNextVaultAssetByUiId(uiId) {
+  const lookup = await buildNextVaultUiMaps();
+  const uiAsset = lookup?.assets?.get(String(uiId)) || null;
+  if (!uiAsset?.nextVaultId || !legacyIngestBridge?.vault?.objects) {
+    return null;
+  }
+
+  const asset = await legacyIngestBridge.vault.objects.getFileAsset(uiAsset.nextVaultId);
+  return asset ? { uiAsset, asset } : null;
+}
+
+async function findNextVaultBrowserCardByUiId(uiId) {
+  const lookup = await buildNextVaultUiMaps();
+  const uiCard = lookup?.browserCards?.get(String(uiId)) || null;
+  if (!uiCard?.id || !legacyIngestBridge?.vault?.objects) {
+    return null;
+  }
+
+  const card = await legacyIngestBridge.vault.objects.getBrowserCard(uiCard.id);
+  return card ? { uiCard, card } : null;
+}
+
+async function removeManagedNextVaultPath(targetPath) {
+  const raw = String(targetPath || '').trim();
+  const rootPath = legacyIngestBridge?.vault?.rootPath;
+  if (!raw || !rootPath) {
+    return false;
+  }
+
+  const resolvedRoot = path.resolve(rootPath);
+  const configuredBackupRoot = getConfiguredAssetBackupRoot();
+  const allowedRoots = [resolvedRoot];
+  if (configuredBackupRoot) {
+    allowedRoots.push(configuredBackupRoot);
+  }
+
+  const resolvedTarget = path.resolve(path.isAbsolute(raw) ? raw : path.join(rootPath, raw));
+  const allowed = allowedRoots.some((allowedRoot) =>
+    resolvedTarget === allowedRoot || resolvedTarget.startsWith(`${allowedRoot}${path.sep}`)
+  );
+  if (!allowed) {
+    return false;
+  }
+
+  try {
+    await fsp.rm(resolvedTarget, { recursive: true, force: false });
+    return true;
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      return false;
+    }
+    console.warn('Remove managed NextVault path failed:', resolvedTarget, error);
+    return false;
+  }
+}
+
+async function updateNextVaultRecordContent(payload = {}) {
+  const target = await findNextVaultRecordByUiId(payload.id);
+  if (!target) {
+    return null;
+  }
+  if (target.kind !== 'text') {
+    throw new Error('仅文本记录支持编辑正文');
+  }
+
+  return legacyIngestBridge.vault.objects.putRecord({
+    ...target.object,
+    id: target.object.id,
+    text: String(payload.textContent || ''),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+async function updateNextVaultRecordNote(payload = {}) {
+  const target = await findNextVaultRecordByUiId(payload.id);
+  if (!target) {
+    return null;
+  }
+
+  const now = new Date().toISOString();
+  if (target.kind === 'image') {
+    return legacyIngestBridge.vault.objects.putImageAsset({
+      ...target.object,
+      id: target.object.id,
+      note: String(payload.editableNote || ''),
+      updatedAt: now
+    });
+  }
+
+  return legacyIngestBridge.vault.objects.putRecord({
+    ...target.object,
+    id: target.object.id,
+    note: String(payload.editableNote || ''),
+    updatedAt: now
+  });
+}
+
+async function updateNextVaultRecordCategory(uiId, category) {
+  const target = await findNextVaultRecordByUiId(uiId);
+  if (!target) {
+    return null;
+  }
+
+  const nextCategory = category === 'common' ? 'common' : 'daily';
+  const now = new Date().toISOString();
+  const nextCapture = {
+    ...(target.object.capture || {}),
+    category: nextCategory
+  };
+
+  if (target.kind === 'image') {
+    return legacyIngestBridge.vault.objects.putImageAsset({
+      ...target.object,
+      id: target.object.id,
+      capture: nextCapture,
+      updatedAt: now
+    });
+  }
+
+  return legacyIngestBridge.vault.objects.putRecord({
+    ...target.object,
+    id: target.object.id,
+    capture: nextCapture,
+    updatedAt: now
+  });
+}
+
+async function deleteNextVaultRecordByUiId(uiId) {
+  const target = await findNextVaultRecordByUiId(uiId);
+  if (!target) {
+    return false;
+  }
+
+  if (target.kind === 'image') {
+    await removeManagedNextVaultPath(target.object?.file?.path || '');
+    await legacyIngestBridge.vault.objects.deleteImageAsset(target.object.id);
+    return true;
+  }
+
+  await legacyIngestBridge.vault.objects.deleteRecord(target.object.id);
+  return true;
+}
+
+async function updateNextVaultAssetNote(payload = {}) {
+  const target = await findNextVaultAssetByUiId(payload.id);
+  if (!target) {
+    return null;
+  }
+
+  return legacyIngestBridge.vault.objects.putFileAsset({
+    ...target.asset,
+    id: target.asset.id,
+    note: String(payload.note || ''),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+async function deleteNextVaultAssetByUiId(uiId) {
+  const target = await findNextVaultAssetByUiId(uiId);
+  if (!target) {
+    return false;
+  }
+
+  await removeManagedNextVaultPath(target.asset?.paths?.storedPath || '');
+  await legacyIngestBridge.vault.objects.deleteFileAsset(target.asset.id);
+  return true;
+}
+
+async function updateNextVaultBrowserCardByUiId(uiId, updater) {
+  const target = await findNextVaultBrowserCardByUiId(uiId);
+  if (!target) {
+    return null;
+  }
+
+  const nextPartial = updater({ ...target.card }, { ...target.uiCard });
+  if (!nextPartial || typeof nextPartial !== 'object') {
+    throw new Error('浏览器卡片更新失败');
+  }
+
+  const mergedExtra = nextPartial.extra
+    ? {
+      ...(target.card.extra || {}),
+      ...nextPartial.extra
+    }
+    : (target.card.extra || {});
+
+  return legacyIngestBridge.vault.objects.putBrowserCard({
+    ...target.card,
+    ...nextPartial,
+    id: target.card.id,
+    extra: mergedExtra,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+async function updateNextVaultBrowserCard(payload = {}) {
+  return updateNextVaultBrowserCardByUiId(payload.id, () => ({
+    name: String(payload.name || ''),
+    remark: String(payload.remark || ''),
+    openUrl: String(payload.openUrl || ''),
+    username: String(payload.username || ''),
+    password: String(payload.password || '')
+  }));
+}
+
+async function deleteNextVaultBrowserCardByUiId(uiId) {
+  const target = await findNextVaultBrowserCardByUiId(uiId);
+  if (!target) {
+    return false;
+  }
+
+  await legacyIngestBridge.vault.objects.deleteBrowserCard(target.card.id);
+  return true;
 }
 
 function ensureApiConfigTemplate() {
@@ -1805,16 +2560,112 @@ function buildFloatingMenuPayload() {
   };
 }
 
-function sendFloatingMenuState() {
-  const payload = buildFloatingMenuPayload();
-
-  const windows = [floatingWindow, floatingMenuWindow];
-  windows.forEach((win) => {
-    if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
-      return;
+async function buildNextVaultFloatingMenuPayload() {
+  const settings = getSettings();
+  const customPath = String(settings.floatingIconCustomPath || '').trim();
+  const customIconUrl = customPath && fs.existsSync(customPath)
+    ? pathToFileURL(customPath).href
+    : '';
+  const opacityRaw = Number(settings.floatingIconOpacity);
+  const floatingIconOpacity = Number.isFinite(opacityRaw) ? Math.max(0.2, Math.min(1, opacityRaw)) : 1;
+  let menuCenter = null;
+  if (floatingMenuOpen) {
+    const menuBounds = getFloatingBounds('visible', true);
+    const anchor = floatingAnchorBoundsCache || getStableFloatingAnchorForMenuOpen();
+    if (menuBounds && anchor) {
+      const rawCenterX = (anchor.x + ((Number(anchor.width) || FLOATING_WINDOW_SIZE) / 2)) - menuBounds.x;
+      const rawCenterY = (anchor.y + ((Number(anchor.height) || FLOATING_WINDOW_SIZE) / 2)) - menuBounds.y;
+      const margin = 22;
+      menuCenter = {
+        x: Math.max(margin, Math.min(menuBounds.width - margin, Math.round(rawCenterX))),
+        y: Math.max(margin, Math.min(menuBounds.height - margin, Math.round(rawCenterY)))
+      };
     }
-    win.webContents.send('floating-menu-state', payload);
+  }
+
+  const dockSideRaw = String(settings.floatingDockSide || '').trim().toLowerCase();
+  const dockSide = dockSideRaw === 'left' || dockSideRaw === 'right' ? dockSideRaw : 'free';
+  const snapshot = await buildNextVaultSnapshot();
+  const records = Array.isArray(snapshot?.records) ? snapshot.records.map((item) => normalizeRecord(item)) : [];
+  const assets = Array.isArray(snapshot?.assets) ? snapshot.assets.map((item) => normalizeAsset(item)) : [];
+  const lastRecord = records[0] || null;
+
+  const mapRecordSummary = (item) => ({
+    id: item.id,
+    title: item.displayTitle || '未命名记录',
+    preview: item.preview || '',
+    contentType: item.contentType || 'text',
+    sourceApp: item.sourceAppDisplay || '未知应用',
+    updatedAt: item.lastCapturedAt || item.updatedAt || item.createdAt || ''
   });
+
+  const mapAssetSummary = (item) => ({
+    id: item.id,
+    title: item.name || '未命名资源',
+    preview: item.note || item.primaryPath || '',
+    entryType: item.entryType || 'file',
+    mode: item.mode || 'link',
+    status: item.statusDisplay || '',
+    updatedAt: item.updatedAt || item.createdAt || ''
+  });
+
+  return {
+    open: floatingMenuOpen,
+    dockSide,
+    menuSide: floatingMenuSide,
+    accumulation: getAccumulationState(),
+    lastCapture: lastRecord
+      ? {
+        available: true,
+        preview: buildRecordPreview(lastRecord),
+        shortcutLabel: settings.deleteLastCaptureShortcut || ''
+      }
+      : {
+        available: false,
+        preview: '',
+        shortcutLabel: settings.deleteLastCaptureShortcut || ''
+      },
+    floatingIconOpacity,
+    floatingIconCustomPath: customPath,
+    floatingIconCustomUrl: customIconUrl,
+    menuCenter,
+    recentDailyRecords: records
+      .filter((item) => (item.category || 'daily') === 'daily')
+      .slice(0, 4)
+      .map(mapRecordSummary),
+    recentCommonRecords: records
+      .filter((item) => (item.category || 'daily') === 'common')
+      .slice(0, 4)
+      .map(mapRecordSummary),
+    recentAssets: assets
+      .slice(0, 4)
+      .map(mapAssetSummary)
+  };
+}
+
+function sendFloatingMenuState() {
+  const windows = [floatingWindow, floatingMenuWindow];
+  const emitPayload = (payload) => {
+    windows.forEach((win) => {
+      if (!win || win.isDestroyed() || !win.webContents || win.webContents.isDestroyed()) {
+        return;
+      }
+      win.webContents.send('floating-menu-state', payload);
+    });
+  };
+
+  if (isNextVaultReadEnabled()) {
+    buildNextVaultFloatingMenuPayload()
+      .then(emitPayload)
+      .catch((error) => {
+        legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+        console.error('Send NextVault floating menu state failed:', error);
+        emitPayload(buildFloatingMenuPayload());
+      });
+    return;
+  }
+
+  emitPayload(buildFloatingMenuPayload());
 }
 
 function execForegroundProbe(command, args, parser) {
@@ -2071,6 +2922,26 @@ function getPythonBridgeConfigFromPayload(payload = {}) {
 
 function sendSnapshot(statusText) {
   if (!mainWindow || mainWindow.webContents.isDestroyed()) return;
+
+  if (isNextVaultReadEnabled()) {
+    buildNextVaultSnapshot()
+      .then((snapshot) => {
+        if (!snapshot || !mainWindow || mainWindow.webContents.isDestroyed()) {
+          return;
+        }
+        mainWindow.webContents.send('snapshot', {
+          ...snapshot,
+          settings: getSettings(),
+          statusText: statusText || snapshot.statusText || defaultStatusText()
+        });
+      })
+      .catch((error) => {
+        legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+        console.error('Send NextVault snapshot failed:', error);
+      });
+    return;
+  }
+
   const records = storage.getAllRecords().map(normalizeRecord);
   const assets = storage.getAllAssets().map(normalizeAsset);
   const browserCards = storage.getAllBrowserCards().map(normalizeBrowserCard);
@@ -2198,6 +3069,10 @@ function processPayload(payload, method, statusLabel, options = {}) {
     sourceApp: sourceContext.sourceApp,
     windowTitle: sourceContext.windowTitle
   });
+  mirrorPayloadToNextVault(payload, method, {
+    category,
+    sourceContext
+  });
   notify('DeskLibrary', '已收藏');
   sendSnapshot(statusLabel || '收藏成功');
   sendFloatingMenuState();
@@ -2229,6 +3104,7 @@ function startAccumulation() {
   accumulationSession = {
     active: true,
     recordId: null,
+    sourceContext: null,
     segments: [],
     segmentCount: 0,
     lastPayloadSignature: '',
@@ -2282,6 +3158,7 @@ function appendAccumulationPayload(payload) {
 
   if (!accumulationSession.recordId) {
     const sourceContext = getForegroundWindowContext();
+    accumulationSession.sourceContext = sourceContext;
     const created = storage.addRecord({
       contentType: 'text',
       textContent: mergedText,
@@ -2355,6 +3232,14 @@ function finishAccumulation() {
       accumulationActive: false,
       accumulationCount: accumulationSession.segmentCount,
       accumulationSegments: accumulationSession.segments
+    });
+
+    mirrorTextToNextVault(formatAccumulationText(accumulationSession.segments), {
+      captureMethod: 'accumulation',
+      category: 'daily',
+      sourceType: 'clipboard',
+      sourceApp: accumulationSession.sourceContext?.sourceApp || '',
+      windowTitle: accumulationSession.sourceContext?.windowTitle || ''
     });
   }
 
@@ -3056,15 +3941,45 @@ function setupKeyboardListener() {
 }
 
 function setupIpc() {
-  ipcMain.handle('get-initial-data', async () => ({
-    records: storage.getAllRecords().map(normalizeRecord),
-    assets: storage.getAllAssets().map(normalizeAsset),
-    browserCards: storage.getAllBrowserCards().map(normalizeBrowserCard),
-    dateFilters: storage.getDateFilters(),
-    categoryFilters: storage.getCategoryFilters(),
-    settings: getSettings(),
-    statusText: '后台监听中'
+  ipcMain.handle('get-initial-data', async () => {
+    if (isNextVaultReadEnabled()) {
+      try {
+        const nextSnapshot = await buildNextVaultSnapshot();
+        if (nextSnapshot) {
+          return nextSnapshot;
+        }
+      } catch (error) {
+        legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+        console.error('Build NextVault snapshot failed:', error);
+      }
+    }
+
+    return {
+      records: storage.getAllRecords().map(normalizeRecord),
+      assets: storage.getAllAssets().map(normalizeAsset),
+      browserCards: storage.getAllBrowserCards().map(normalizeBrowserCard),
+      dateFilters: storage.getDateFilters(),
+      categoryFilters: storage.getCategoryFilters(),
+      settings: getSettings(),
+      statusText: '后台监听中'
+    };
+  });
+
+  ipcMain.handle('get-next-vault-status', async () => ({
+    ok: true,
+    status: getNextVaultMirrorStatus()
   }));
+
+  ipcMain.handle('query-next-vault', async (_, keyword = '') => {
+    try {
+      return await queryNextVault(keyword);
+    } catch (error) {
+      return {
+        ok: false,
+        message: error && error.message ? error.message : '查询失败'
+      };
+    }
+  });
 
   ipcMain.handle('save-settings', async (_, settings) => {
     try {
@@ -3109,28 +4024,81 @@ function setupIpc() {
     if (!value) {
       return { ok: false, message: '内容不能为空' };
     }
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        await legacyIngestBridge.ingestTextRecord(value, {
+          captureMethod: 'manual',
+          category: 'daily',
+          sourceType: 'manual',
+          sourceApp: 'DeskLibrary',
+          windowTitle: '手动新增'
+        });
+        sendSnapshot('手动新增成功');
+        return { ok: true };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '新增失败' };
+      }
+    }
     const duplicate = storage.findDuplicate({ contentType: 'text', textContent: value, signature: value });
     if (duplicate) {
       return { ok: false, message: '该文本已存在，未重复新增' };
     }
     storage.addManualTextRecord(value);
+    mirrorTextToNextVault(value, {
+      captureMethod: 'manual',
+      category: 'daily',
+      sourceType: 'manual',
+      sourceApp: 'DeskLibrary',
+      windowTitle: '手动新增'
+    });
     sendSnapshot('手动新增成功');
     return { ok: true };
   });
 
   ipcMain.handle('update-record-content', async (_, payload) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const result = await updateNextVaultRecordContent(payload);
+        sendSnapshot(result ? '正文已保存' : '记录不存在');
+        return { ok: !!result, message: result ? '' : '记录不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '正文保存失败' };
+      }
+    }
+
     const result = storage.updateRecord(payload.id, { textContent: payload.textContent || '' });
     sendSnapshot('正文已保存');
     return { ok: !!result };
   });
 
   ipcMain.handle('update-record-note', async (_, payload) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const result = await updateNextVaultRecordNote(payload);
+        sendSnapshot(result ? '备注已保存' : '记录不存在');
+        return { ok: !!result, message: result ? '' : '记录不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '备注保存失败' };
+      }
+    }
+
     const result = storage.updateRecord(payload.id, { editableNote: payload.editableNote || '' });
     sendSnapshot('备注已保存');
     return { ok: !!result };
   });
 
   ipcMain.handle('delete-record', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const ok = await deleteNextVaultRecordByUiId(id);
+        sendSnapshot(ok ? '记录已删除' : '记录不存在');
+        sendFloatingMenuState();
+        return { ok, message: ok ? '' : '记录不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '删除失败' };
+      }
+    }
+
     const ok = storage.deleteRecord(id);
     sendSnapshot('记录已删除');
     sendFloatingMenuState();
@@ -3138,6 +4106,23 @@ function setupIpc() {
   });
 
   ipcMain.handle('delete-records', async (_, ids = []) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const list = Array.isArray(ids) ? ids : [];
+        let count = 0;
+        for (const id of list) {
+          if (await deleteNextVaultRecordByUiId(id)) {
+            count += 1;
+          }
+        }
+        sendSnapshot(count ? `已删除 ${count} 条记录` : '没有删除任何记录');
+        sendFloatingMenuState();
+        return { ok: true, count };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '批量删除失败' };
+      }
+    }
+
     const list = Array.isArray(ids) ? ids : [];
     let count = 0;
     for (const id of list) {
@@ -3158,6 +4143,26 @@ function setupIpc() {
   });
 
   ipcMain.handle('copy-record-content', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      const target = await findNextVaultRecordByUiId(id);
+      if (!target?.uiRecord) {
+        return { ok: false, message: '记录不存在' };
+      }
+
+      if (target.uiRecord.contentType === 'text') {
+        writeInternalTextToClipboard(target.uiRecord.textContent || '');
+        return { ok: true };
+      }
+
+      if (target.uiRecord.contentType === 'image' && target.uiRecord.imageDataUrl) {
+        const image = nativeImage.createFromDataURL(target.uiRecord.imageDataUrl);
+        clipboard.writeImage(image);
+        return { ok: true };
+      }
+
+      return { ok: false, message: '该记录没有可复制内容' };
+    }
+
     const record = storage.getAllRecords().find((item) => item.id === id);
     if (!record) {
       return { ok: false, message: '记录不存在' };
@@ -3225,7 +4230,18 @@ function setupIpc() {
     try {
       const mode = payload.mode === 'backup' ? 'backup' : 'link';
       const paths = Array.isArray(payload.paths) ? payload.paths : [];
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const imported = await legacyIngestBridge.importAssets({
+          mode,
+          paths,
+          backupRootPath: getConfiguredAssetBackupRoot()
+        });
+        sendSnapshot(imported.length ? '资源已导入' : '没有可导入的新资源');
+        sendFloatingMenuState();
+        return { ok: true, count: imported.length };
+      }
       const imported = storage.importAssets(paths.map((sourcePath) => ({ sourcePath })), mode);
+      await mirrorAssetsToNextVault(paths, mode);
       sendSnapshot(imported.length ? '资源已导入' : '没有可导入的新资源');
       sendFloatingMenuState();
       return { ok: true, count: imported.length };
@@ -3451,7 +4467,13 @@ function setupIpc() {
   ipcMain.handle('import-browser-cards', async (_, payload = {}) => {
     try {
       const cards = Array.isArray(payload.cards) ? payload.cards : [];
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const imported = await legacyIngestBridge.importBrowserCards({ cards });
+        sendSnapshot(imported.length ? '浏览器卡片已导入' : '没有可导入的新卡片');
+        return { ok: true, count: imported.length };
+      }
       const imported = storage.importBrowserCards(cards);
+      await mirrorBrowserCardsToNextVault(cards);
       sendSnapshot(imported.length ? '浏览器卡片已导入' : '没有可导入的新卡片');
       return { ok: true, count: imported.length };
     } catch (error) {
@@ -3503,6 +4525,16 @@ function setupIpc() {
   });
 
   ipcMain.handle('update-browser-card', async (_, payload = {}) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const result = await updateNextVaultBrowserCard(payload);
+        sendSnapshot(result ? '浏览器卡片已保存' : '浏览器卡片不存在');
+        return { ok: !!result, message: result ? '' : '浏览器卡片不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '保存失败' };
+      }
+    }
+
     const result = storage.updateBrowserCard(payload.id, {
       name: payload.name || '',
       remark: payload.remark || '',
@@ -3516,6 +4548,37 @@ function setupIpc() {
 
   ipcMain.handle('refresh-browser-card-cookies', async (_, id) => {
     try {
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const target = await findNextVaultBrowserCardByUiId(id);
+        if (!target) {
+          return { ok: false, message: '浏览器卡片不存在' };
+        }
+        const result = await runPythonBridge('refresh-card-cookies', {
+          ...getPythonBridgeConfig(),
+          cardJson: JSON.stringify(target.uiCard)
+        });
+        if (!result.ok) {
+          return result;
+        }
+        const mergedCookies = mergeBrowserCardCookies(target.uiCard.cookies, Array.isArray(result.cookies) ? result.cookies : []);
+        const mergedCookieNames = [...new Set(mergedCookies.map((item) => item?.name).filter(Boolean))];
+        const updated = await updateNextVaultBrowserCardByUiId(id, (card) => ({
+          cookies: mergedCookies,
+          cookieNames: mergedCookieNames,
+          extra: {
+            ...(card.extra || {}),
+            cookieCount: mergedCookies.length
+          }
+        }));
+        if (!updated) {
+          return { ok: false, message: '卡片更新失败' };
+        }
+        const incomingCount = Array.isArray(result.cookies) ? result.cookies.length : 0;
+        const message = `${result.message || 'Cookie 已更新'}；已合并保存 ${mergedCookies.length} 条（本次更新 ${incomingCount} 条，新值优先覆盖旧值）`;
+        sendSnapshot(message);
+        return { ok: true, message };
+      }
+
       const card = storage.getAllBrowserCards().find((item) => item.id === id);
       if (!card) {
         return { ok: false, message: '浏览器卡片不存在' };
@@ -3551,6 +4614,34 @@ function setupIpc() {
 
   ipcMain.handle('rewrite-browser-card-cookies', async (_, id) => {
     try {
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const target = await findNextVaultBrowserCardByUiId(id);
+        if (!target) {
+          return { ok: false, message: '浏览器卡片不存在' };
+        }
+        const result = await runPythonBridge('rewrite-card-cookies', {
+          ...getPythonBridgeConfig(),
+          cardJson: JSON.stringify(target.uiCard)
+        });
+        const rewriteDebug = result && result.rewriteDebug !== undefined ? result.rewriteDebug : null;
+        if (!result.ok) {
+          return { ok: false, message: result.message || '重写失败', rewriteDebug };
+        }
+        const updated = await updateNextVaultBrowserCardByUiId(id, (card) => ({
+          cookies: Array.isArray(result.cookies) ? result.cookies : [],
+          cookieNames: Array.isArray(result.cookieNames) ? result.cookieNames : [],
+          extra: {
+            ...(card.extra || {}),
+            cookieCount: Number(result.cookieCount || 0)
+          }
+        }));
+        if (!updated) {
+          return { ok: false, message: '卡片更新失败', rewriteDebug };
+        }
+        sendSnapshot(result.message || 'Cookie 已重写');
+        return { ok: true, message: result.message || 'Cookie 已重写', rewriteDebug };
+      }
+
       const card = storage.getAllBrowserCards().find((item) => item.id === id);
       if (!card) {
         return { ok: false, message: '浏览器卡片不存在' };
@@ -3583,6 +4674,33 @@ function setupIpc() {
 
   ipcMain.handle('open-browser-card', async (_, id) => {
     try {
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const target = await findNextVaultBrowserCardByUiId(id);
+        if (!target) {
+          return { ok: false, message: '浏览器卡片不存在' };
+        }
+        let result;
+        try {
+          result = await runPythonBridge('default-open', {
+            ...getPythonBridgeConfig(),
+            cardJson: JSON.stringify(target.uiCard)
+          });
+        } catch {
+          result = openBrowserCard(target.uiCard);
+        }
+        if (result.ok) {
+          await updateNextVaultBrowserCardByUiId(id, (card) => ({
+            extra: {
+              ...(card.extra || {}),
+              lastUsedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+              lastUsedMethod: 'default_open'
+            }
+          }));
+          sendSnapshot('浏览器卡片已打开');
+        }
+        return result;
+      }
+
       const card = storage.getAllBrowserCards().find((item) => item.id === id);
       if (!card) {
         return { ok: false, message: '浏览器卡片不存在' };
@@ -3614,6 +4732,28 @@ function setupIpc() {
 
   ipcMain.handle('inject-browser-card', async (_, id) => {
     try {
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const target = await findNextVaultBrowserCardByUiId(id);
+        if (!target) {
+          return { ok: false, message: '浏览器卡片不存在' };
+        }
+        const result = await runPythonBridge('inject-open', {
+          ...getPythonBridgeConfig(),
+          cardJson: JSON.stringify(target.uiCard)
+        });
+        if (result.ok) {
+          await updateNextVaultBrowserCardByUiId(id, (card) => ({
+            extra: {
+              ...(card.extra || {}),
+              lastUsedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+              lastUsedMethod: 'inject'
+            }
+          }));
+          sendSnapshot('Cookie 转移完成');
+        }
+        return result;
+      }
+
       const card = storage.getAllBrowserCards().find((item) => item.id === id);
       if (!card) {
         return { ok: false, message: '浏览器卡片不存在' };
@@ -3652,6 +4792,33 @@ function setupIpc() {
       const id = String(payload.id || '');
       const method = payload.method === 'db_write' ? 'db_write' : 'inject';
       const target = payload.target && typeof payload.target === 'object' ? payload.target : null;
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const cardTarget = await findNextVaultBrowserCardByUiId(id);
+        if (!cardTarget) {
+          return { ok: false, message: '浏览器卡片不存在' };
+        }
+        if (!target) {
+          return { ok: false, message: '未选择目标浏览器' };
+        }
+        const result = await runPythonBridge('inject-to-target', {
+          ...getPythonBridgeConfig(),
+          method,
+          cardJson: JSON.stringify(cardTarget.uiCard),
+          targetJson: JSON.stringify(target)
+        });
+        if (result.ok) {
+          await updateNextVaultBrowserCardByUiId(id, (card) => ({
+            extra: {
+              ...(card.extra || {}),
+              lastUsedAt: new Date().toLocaleString('zh-CN', { hour12: false }),
+              lastUsedMethod: method
+            }
+          }));
+          sendSnapshot(result.message || 'Cookie 转移完成');
+        }
+        return result;
+      }
+
       const card = storage.getAllBrowserCards().find((item) => item.id === id);
       if (!card) {
         return { ok: false, message: '浏览器卡片不存在' };
@@ -3679,6 +4846,15 @@ function setupIpc() {
   });
 
   ipcMain.handle('open-browser-card-source', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      const target = await findNextVaultBrowserCardByUiId(id);
+      const userDataDir = target?.uiCard?.browserSource?.userDataDir;
+      if (!target) return { ok: false, message: '浏览器卡片不存在' };
+      if (!userDataDir) return { ok: false, message: '来源目录不存在' };
+      shell.showItemInFolder(userDataDir);
+      return { ok: true };
+    }
+
     const card = storage.getAllBrowserCards().find((item) => item.id === id);
     if (!card) return { ok: false, message: '浏览器卡片不存在' };
     const userDataDir = card.browserSource?.userDataDir;
@@ -3688,6 +4864,16 @@ function setupIpc() {
   });
 
   ipcMain.handle('delete-browser-card', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const ok = await deleteNextVaultBrowserCardByUiId(id);
+        sendSnapshot(ok ? '浏览器卡片已删除' : '浏览器卡片不存在');
+        return { ok, message: ok ? '' : '浏览器卡片不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '删除失败' };
+      }
+    }
+
     const ok = storage.deleteBrowserCard(id);
     sendSnapshot(ok ? '浏览器卡片已删除' : '删除失败');
     return { ok };
@@ -3695,6 +4881,18 @@ function setupIpc() {
 
   ipcMain.handle('delete-browser-cards', async (_, ids = []) => {
     try {
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const targets = Array.isArray(ids) ? ids : [];
+        let count = 0;
+        for (const id of targets) {
+          if (await deleteNextVaultBrowserCardByUiId(id)) {
+            count += 1;
+          }
+        }
+        sendSnapshot(count ? `已删除 ${count} 张浏览器卡片` : '没有删除任何卡片');
+        return { ok: true, count };
+      }
+
       const targets = Array.isArray(ids) ? ids : [];
       let count = 0;
       targets.forEach((id) => {
@@ -3711,6 +4909,28 @@ function setupIpc() {
 
   ipcMain.handle('check-browser-card-connectivity', async (_, ids = []) => {
     try {
+      if (isNextVaultReadEnabled() && legacyIngestBridge) {
+        const targets = Array.isArray(ids) ? ids : [];
+        const results = [];
+        for (const id of targets) {
+          const target = await findNextVaultBrowserCardByUiId(id);
+          if (!target) {
+            continue;
+          }
+          const result = await requestUrlStatus(target.uiCard.openUrl || target.uiCard.url || '');
+          await updateNextVaultBrowserCardByUiId(id, (card) => ({
+            extra: {
+              ...(card.extra || {}),
+              testOk: !!result.ok,
+              testTitle: result.title || ''
+            }
+          }));
+          results.push({ id, ...result });
+        }
+        sendSnapshot(results.length ? `已完成 ${results.length} 张卡片连通性测试` : '没有可测试的卡片');
+        return { ok: true, results };
+      }
+
       const targets = Array.isArray(ids) ? ids : [];
       const cards = storage.getAllBrowserCards();
       const results = [];
@@ -3734,6 +4954,17 @@ function setupIpc() {
   });
 
   ipcMain.handle('update-asset-note', async (_, payload = {}) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const result = await updateNextVaultAssetNote(payload);
+        sendSnapshot(result ? '资源备注已保存' : '资源不存在');
+        sendFloatingMenuState();
+        return { ok: !!result, message: result ? '' : '资源不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '备注保存失败' };
+      }
+    }
+
     const result = storage.updateAsset(payload.id, { note: payload.note || '' });
     sendSnapshot('资源备注已保存');
     sendFloatingMenuState();
@@ -3741,6 +4972,13 @@ function setupIpc() {
   });
 
   ipcMain.handle('open-asset-primary', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      const target = await findNextVaultAssetByUiId(id);
+      if (!target?.uiAsset || !target.uiAsset.primaryPath) return { ok: false, message: '资源不存在' };
+      const errorMessage = await shell.openPath(target.uiAsset.primaryPath);
+      return { ok: !errorMessage, message: errorMessage || '' };
+    }
+
     const asset = storage.getAllAssets().find((item) => item.id === id);
     if (!asset || !asset.primaryPath) return { ok: false, message: '资源不存在' };
     const errorMessage = await shell.openPath(asset.primaryPath);
@@ -3748,6 +4986,13 @@ function setupIpc() {
   });
 
   ipcMain.handle('open-asset-source', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      const target = await findNextVaultAssetByUiId(id);
+      if (!target?.uiAsset || !target.uiAsset.sourcePath) return { ok: false, message: '原路径不存在' };
+      const errorMessage = await shell.openPath(target.uiAsset.sourcePath);
+      return { ok: !errorMessage, message: errorMessage || '' };
+    }
+
     const asset = storage.getAllAssets().find((item) => item.id === id);
     if (!asset || !asset.sourcePath) return { ok: false, message: '原路径不存在' };
     const errorMessage = await shell.openPath(asset.sourcePath);
@@ -3755,6 +5000,13 @@ function setupIpc() {
   });
 
   ipcMain.handle('open-asset-location', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      const target = await findNextVaultAssetByUiId(id);
+      if (!target?.uiAsset || !target.uiAsset.sourcePath) return { ok: false, message: '资源不存在' };
+      shell.showItemInFolder(target.uiAsset.sourcePath);
+      return { ok: true };
+    }
+
     const asset = storage.getAllAssets().find((item) => item.id === id);
     if (!asset || !asset.sourcePath) return { ok: false, message: '资源不存在' };
     shell.showItemInFolder(asset.sourcePath);
@@ -3762,6 +5014,13 @@ function setupIpc() {
   });
 
   ipcMain.handle('open-asset-stored', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      const target = await findNextVaultAssetByUiId(id);
+      if (!target?.uiAsset || !target.uiAsset.storedPath) return { ok: false, message: '备份文件不存在' };
+      const errorMessage = await shell.openPath(target.uiAsset.storedPath);
+      return { ok: !errorMessage, message: errorMessage || '' };
+    }
+
     const asset = storage.getAllAssets().find((item) => item.id === id);
     if (!asset || !asset.storedPath) return { ok: false, message: '备份文件不存在' };
     const errorMessage = await shell.openPath(asset.storedPath);
@@ -3769,6 +5028,13 @@ function setupIpc() {
   });
 
   ipcMain.handle('open-asset-stored-location', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      const target = await findNextVaultAssetByUiId(id);
+      if (!target?.uiAsset || !target.uiAsset.storedPath) return { ok: false, message: '备份文件不存在' };
+      shell.showItemInFolder(target.uiAsset.storedPath);
+      return { ok: true };
+    }
+
     const asset = storage.getAllAssets().find((item) => item.id === id);
     if (!asset || !asset.storedPath) return { ok: false, message: '备份文件不存在' };
     shell.showItemInFolder(asset.storedPath);
@@ -3776,6 +5042,17 @@ function setupIpc() {
   });
 
   ipcMain.handle('delete-asset', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const ok = await deleteNextVaultAssetByUiId(id);
+        sendSnapshot(ok ? '资源已删除' : '资源不存在');
+        sendFloatingMenuState();
+        return { ok, message: ok ? '' : '资源不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '删除失败' };
+      }
+    }
+
     const ok = storage.deleteAsset(id);
     sendSnapshot('资源已删除');
     sendFloatingMenuState();
@@ -3783,6 +5060,17 @@ function setupIpc() {
   });
 
   ipcMain.handle('move-record-to-common', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const result = await updateNextVaultRecordCategory(id, 'common');
+        sendSnapshot(result ? '已加入常用' : '记录不存在');
+        sendFloatingMenuState();
+        return { ok: !!result, message: result ? '' : '记录不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '更新失败' };
+      }
+    }
+
     const result = storage.updateRecord(id, { category: 'common' });
     sendSnapshot('已加入常用');
     sendFloatingMenuState();
@@ -3790,6 +5078,17 @@ function setupIpc() {
   });
 
   ipcMain.handle('move-record-to-daily', async (_, id) => {
+    if (isNextVaultReadEnabled() && legacyIngestBridge) {
+      try {
+        const result = await updateNextVaultRecordCategory(id, 'daily');
+        sendSnapshot(result ? '已移出常用' : '记录不存在');
+        sendFloatingMenuState();
+        return { ok: !!result, message: result ? '' : '记录不存在' };
+      } catch (error) {
+        return { ok: false, message: error && error.message ? error.message : '更新失败' };
+      }
+    }
+
     const result = storage.updateRecord(id, { category: 'daily' });
     sendSnapshot('已移出常用');
     sendFloatingMenuState();
@@ -3909,9 +5208,20 @@ function setupIpc() {
     return { ok: true };
   });
 
-  ipcMain.handle('floating-get-menu-state', async () => ({
-    ...buildFloatingMenuPayload()
-  }));
+  ipcMain.handle('floating-get-menu-state', async () => {
+    if (isNextVaultReadEnabled()) {
+      try {
+        return await buildNextVaultFloatingMenuPayload();
+      } catch (error) {
+        legacyIngestBridgeState.lastError = error && error.message ? error.message : String(error || '');
+        console.error('Build NextVault floating menu payload failed:', error);
+      }
+    }
+
+    return {
+      ...buildFloatingMenuPayload()
+    };
+  });
 
   ipcMain.handle('open-screenshot-translate', async () => {
     try {
@@ -4326,9 +5636,10 @@ function setupIpc() {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   app.setName('DeskLibrary');
   storage = new StorageService(app.getPath('userData'));
+  await initLegacyIngestBridge();
   syncStartupSettingFromSystem();
   setupIpc();
   createWindow();

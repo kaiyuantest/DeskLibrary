@@ -109,6 +109,15 @@
                 <input id="dailySearchInput" class="search-input" type="text" placeholder="搜索内容 / 备注 / 标题" />
               </label>
 
+              <section class="control-card ai-query-card">
+                <div class="search-card-head">
+                  <span class="control-label">AI 查询 NextVault</span>
+                  <button id="aiQueryBtn" class="search-icon-btn" type="button" title="查询">查</button>
+                </div>
+                <input id="aiQueryInput" class="search-input" type="text" placeholder="例如：PathExplorer / youtube / 考公" />
+                <div class="ai-query-hint">直接查询 NextVault，先列命中项，再给结论。</div>
+              </section>
+
               <label class="control-card date-card mobile-collapsible">
                 <span class="control-label">日期筛选</span>
                 <input id="dailyDatePicker" class="date-input" type="date" />
@@ -120,6 +129,14 @@
               </section>
             </section>
           </header>
+
+          <section id="aiQueryPanel" class="ai-query-panel hidden">
+            <section class="section-head compact">
+              <span>AI 查询结果</span>
+              <span id="aiQuerySummary" class="count-chip">未查询</span>
+            </section>
+            <section id="aiQueryResults" class="cards-grid compact-grid"></section>
+          </section>
 
           <div class="page-stack">
             <section id="dailyPage" class="page-view page-scroll">

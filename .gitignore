@@ -13,6 +13,11 @@ data/
 %SystemDrive%/
 .gitdata/
 Chrome/
+DeskLibrary.Next/.desktop-runtime/
+DeskLibrary.Next/.tmp-test-*/
+DeskLibrary.Next/**/DeskLibrary.NextVault/
+DeskLibrary.Next/aaa.md
+DeskLibrary.Next/**/*.log
 
 # 临时文件和调试文件
 tmp-print-userdata.js
