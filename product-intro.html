@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeskLibrary 产品介绍</title>
+    <style>
+      :root {
+        --bg: #f6f7fb;
+        --text: #152033;
+        --muted: #66758a;
+        --line: rgba(27, 39, 61, 0.08);
+        --surface: rgba(255, 255, 255, 0.72);
+        --surface-strong: rgba(255, 255, 255, 0.92);
+        --orange: #ff8a3d;
+        --yellow: #ffd966;
+        --blue: #6c8cff;
+        --cyan: #47c3d6;
+        --green: #36b58d;
+        --pink: #ff6e9f;
+        --shadow-xl: 0 32px 90px rgba(54, 69, 98, 0.14);
+        --shadow-lg: 0 18px 45px rgba(54, 69, 98, 0.12);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+        color: var(--text);
+        background:
+          radial-gradient(circle at 12% 14%, rgba(255, 217, 102, 0.55), transparent 18%),
+          radial-gradient(circle at 85% 12%, rgba(108, 140, 255, 0.2), transparent 18%),
+          radial-gradient(circle at 76% 76%, rgba(71, 195, 214, 0.18), transparent 18%),
+          linear-gradient(180deg, #fbfcff 0%, #f5f7fb 56%, #eff3fa 100%);
+        min-height: 100vh;
+        overflow-x: hidden;
+      }
+
+      body::before,
+      body::after {
+        content: "";
+        position: fixed;
+        inset: auto;
+        pointer-events: none;
+        border-radius: 50%;
+        filter: blur(55px);
+        opacity: 0.55;
+        z-index: 0;
+        animation: drift 11s ease-in-out infinite alternate;
+      }
+
+      body::before {
+        width: 240px;
+        height: 240px;
+        left: -40px;
+        top: 80px;
+        background: rgba(255, 138, 61, 0.18);
+      }
+
+      body::after {
+        width: 280px;
+        height: 280px;
+        right: -70px;
+        top: 160px;
+        background: rgba(108, 140, 255, 0.16);
+        animation-duration: 14s;
+      }
+
+      .page {
+        position: relative;
+        z-index: 1;
+        width: min(1260px, calc(100% - 32px));
+        margin: 18px auto 28px;
+      }
+
+      .glass {
+        background: linear-gradient(180deg, rgba(255,255,255,0.82), rgba(255,255,255,0.68));
+        border: 1px solid rgba(255,255,255,0.75);
+        box-shadow: var(--shadow-xl);
+        backdrop-filter: blur(18px);
+      }
+
+      .hero {
+        position: relative;
+        padding: 28px 28px 34px;
+        border-radius: 34px;
+        overflow: hidden;
+      }
+
+      .hero::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          radial-gradient(circle at 85% 14%, rgba(255, 138, 61, 0.18), transparent 22%),
+          radial-gradient(circle at 18% 82%, rgba(71, 195, 214, 0.14), transparent 20%);
+        pointer-events: none;
+      }
+
+      .nav {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 18px;
+        margin-bottom: 26px;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        font-weight: 700;
+        font-size: 16px;
+      }
+
+      .brand-mark {
+        width: 40px;
+        height: 40px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--orange), var(--yellow));
+        box-shadow: 0 10px 24px rgba(255, 154, 83, 0.32);
+        position: relative;
+      }
+
+      .brand-mark::before,
+      .brand-mark::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.95);
+      }
+
+      .brand-mark::before {
+        width: 18px;
+        height: 4px;
+        left: 11px;
+        top: 12px;
+      }
+
+      .brand-mark::after {
+        width: 10px;
+        height: 4px;
+        left: 11px;
+        top: 22px;
+      }
+
+      .nav-pill {
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.72);
+        border: 1px solid rgba(27, 39, 61, 0.08);
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .hero-grid {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        grid-template-columns: 0.96fr 1.04fr;
+        gap: 18px;
+        align-items: center;
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        padding: 10px 14px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.76);
+        border: 1px solid rgba(27, 39, 61, 0.08);
+        color: #5b6880;
+        font-size: 14px;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 9px;
+        height: 9px;
+        border-radius: 999px;
+        background: linear-gradient(135deg, var(--orange), var(--pink));
+      }
+
+      h1 {
+        margin: 18px 0 16px;
+        font-size: 72px;
+        line-height: 0.94;
+        letter-spacing: -0.07em;
+      }
+
+      .lead {
+        margin: 0;
+        max-width: 590px;
+        color: var(--muted);
+        font-size: 19px;
+        line-height: 1.85;
+      }
+
+      .lead strong {
+        color: var(--text);
+      }
+
+      .hero-points {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 24px;
+      }
+
+      .hero-point {
+        padding: 11px 14px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.8);
+        border: 1px solid rgba(27, 39, 61, 0.07);
+        color: #47566b;
+        font-size: 14px;
+      }
+
+      .hero-stage {
+        position: relative;
+        min-height: 620px;
+      }
+
+      .glow {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(36px);
+        pointer-events: none;
+      }
+
+      .glow-a {
+        width: 180px;
+        height: 180px;
+        background: rgba(255, 138, 61, 0.18);
+        left: 80px;
+        top: 40px;
+      }
+
+      .glow-b {
+        width: 220px;
+        height: 220px;
+        background: rgba(108, 140, 255, 0.18);
+        right: 30px;
+        bottom: 90px;
+      }
+
+      .shot {
+        position: absolute;
+        overflow: hidden;
+        border-radius: 26px;
+        background: rgba(255,255,255,0.84);
+        border: 1px solid rgba(255,255,255,0.9);
+        box-shadow: var(--shadow-lg);
+        animation: float 7s ease-in-out infinite;
+      }
+
+      .shot img {
+        display: block;
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+      }
+
+      .shot::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(125deg, transparent 0%, rgba(255,255,255,0.34) 46%, transparent 70%);
+        transform: translateX(-140%);
+        animation: shimmer 7s ease-in-out infinite;
+      }
+
+      .shot-main {
+        width: 490px;
+        height: 320px;
+        right: 40px;
+        top: 48px;
+        transform: rotate(-6deg);
+      }
+
+      .shot-side {
+        width: 260px;
+        height: 180px;
+        left: 24px;
+        top: 84px;
+        transform: rotate(-12deg);
+        animation-delay: -2s;
+      }
+
+      .shot-bottom {
+        width: 300px;
+        height: 200px;
+        left: 120px;
+        bottom: 62px;
+        transform: rotate(8deg);
+        animation-delay: -3s;
+      }
+
+      .shot-float {
+        width: 230px;
+        height: 150px;
+        right: 26px;
+        bottom: 54px;
+        transform: rotate(6deg);
+        animation-delay: -4.5s;
+      }
+
+      .badge-float {
+        position: absolute;
+        padding: 13px 16px;
+        border-radius: 18px;
+        background: rgba(255,255,255,0.82);
+        border: 1px solid rgba(27, 39, 61, 0.08);
+        box-shadow: 0 10px 28px rgba(70, 86, 115, 0.12);
+        color: #405066;
+        font-size: 14px;
+        backdrop-filter: blur(12px);
+      }
+
+      .badge-1 {
+        left: 10px;
+        bottom: 18px;
+      }
+
+      .badge-2 {
+        right: 54px;
+        top: 18px;
+      }
+
+      .stats-bar {
+        margin-top: 22px;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 12px;
+      }
+
+      .stat {
+        padding: 16px 18px;
+        border-radius: 22px;
+        background: rgba(255,255,255,0.68);
+        border: 1px solid rgba(27, 39, 61, 0.06);
+      }
+
+      .stat strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 18px;
+      }
+
+      .stat span {
+        display: block;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .section {
+        margin-top: 22px;
+        padding: 0 4px;
+      }
+
+      .section-shell {
+        padding: 30px;
+        border-radius: 32px;
+      }
+
+      .section-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: end;
+        gap: 16px;
+        margin-bottom: 18px;
+      }
+
+      .section-head h2 {
+        margin: 0;
+        font-size: 40px;
+        letter-spacing: -0.05em;
+      }
+
+      .section-head p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+      }
+
+      .problem-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .problem-card {
+        min-height: 280px;
+        padding: 24px;
+        border-radius: 30px;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .problem-card::before {
+        content: "";
+        position: absolute;
+        width: 170px;
+        height: 170px;
+        right: -42px;
+        top: -54px;
+        border-radius: 50%;
+        opacity: 0.4;
+      }
+
+      .problem-card:nth-child(1) {
+        background: linear-gradient(180deg, #fff4ea, #fffaf4);
+      }
+
+      .problem-card:nth-child(1)::before {
+        background: radial-gradient(circle, rgba(255, 138, 61, 0.26), transparent 70%);
+      }
+
+      .problem-card:nth-child(2) {
+        background: linear-gradient(180deg, #eef9ff, #f7fbff);
+      }
+
+      .problem-card:nth-child(2)::before {
+        background: radial-gradient(circle, rgba(108, 140, 255, 0.22), transparent 70%);
+      }
+
+      .problem-card:nth-child(3) {
+        background: linear-gradient(180deg, #eefaf8, #f8fffc);
+      }
+
+      .problem-card:nth-child(3)::before {
+        background: radial-gradient(circle, rgba(54, 181, 141, 0.22), transparent 70%);
+      }
+
+      .problem-no {
+        position: relative;
+        z-index: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 36px;
+        height: 36px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.82);
+        color: #607086;
+        font-size: 13px;
+        margin-bottom: 14px;
+      }
+
+      .problem-card strong {
+        position: relative;
+        z-index: 1;
+        display: block;
+        margin-bottom: 10px;
+        font-size: 28px;
+        line-height: 1.3;
+      }
+
+      .problem-card p {
+        position: relative;
+        z-index: 1;
+        margin: 0;
+        color: #61707f;
+        font-size: 15px;
+        line-height: 1.8;
+      }
+
+      .problem-card ul {
+        position: relative;
+        z-index: 1;
+        margin: 14px 0 0;
+        padding: 0;
+        list-style: none;
+        display: grid;
+        gap: 8px;
+      }
+
+      .problem-card li {
+        position: relative;
+        padding-left: 16px;
+        color: #506071;
+        font-size: 14px;
+      }
+
+      .problem-card li::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 8px;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: currentColor;
+        opacity: 0.45;
+      }
+
+      .feature-layout {
+        display: grid;
+        grid-template-columns: 1.08fr 0.92fr;
+        gap: 18px;
+      }
+
+      .feature-main {
+        padding: 28px;
+        border-radius: 30px;
+        background:
+          radial-gradient(circle at 10% 18%, rgba(255, 217, 102, 0.24), transparent 16%),
+          radial-gradient(circle at 86% 18%, rgba(71, 195, 214, 0.2), transparent 16%),
+          linear-gradient(180deg, rgba(255,255,255,0.86), rgba(255,255,255,0.68));
+      }
+
+      .feature-main h3 {
+        margin: 0 0 10px;
+        font-size: 34px;
+      }
+
+      .feature-main p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.8;
+      }
+
+      .feature-orbit {
+        margin-top: 22px;
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .feature-pill {
+        padding: 18px;
+        border-radius: 24px;
+        background: rgba(255,255,255,0.76);
+        border: 1px solid rgba(27, 39, 61, 0.07);
+      }
+
+      .feature-pill .icon {
+        font-size: 28px;
+        margin-bottom: 10px;
+      }
+
+      .feature-pill strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 18px;
+      }
+
+      .feature-pill span {
+        display: block;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.7;
+      }
+
+      .feature-aside {
+        display: grid;
+        gap: 14px;
+      }
+
+      .feature-mini {
+        padding: 22px;
+        border-radius: 28px;
+        background: rgba(255,255,255,0.74);
+        border: 1px solid rgba(27, 39, 61, 0.07);
+      }
+
+      .feature-mini strong {
+        display: block;
+        margin-bottom: 9px;
+        font-size: 22px;
+      }
+
+      .feature-mini p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 15px;
+        line-height: 1.8;
+      }
+
+      .open-grid {
+        display: grid;
+        grid-template-columns: 1.06fr 0.94fr;
+        gap: 18px;
+      }
+
+      .open-main {
+        padding: 28px;
+        border-radius: 30px;
+        background: linear-gradient(180deg, rgba(255,255,255,0.88), rgba(255,255,255,0.72));
+      }
+
+      .open-main h3 {
+        margin: 0 0 12px;
+        font-size: 34px;
+      }
+
+      .open-main p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 16px;
+        line-height: 1.8;
+      }
+
+      .free-badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 18px;
+      }
+
+      .free-badge {
+        padding: 11px 14px;
+        border-radius: 999px;
+        background: rgba(255,255,255,0.82);
+        border: 1px solid rgba(27, 39, 61, 0.08);
+        font-size: 14px;
+        color: #486078;
+      }
+
+      .open-list {
+        display: grid;
+        gap: 12px;
+      }
+
+      .open-item {
+        padding: 20px;
+        border-radius: 24px;
+        background: rgba(255,255,255,0.74);
+        border: 1px solid rgba(27, 39, 61, 0.07);
+      }
+
+      .open-item strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 20px;
+      }
+
+      .open-item span {
+        display: block;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.8;
+      }
+
+      .audience-flow {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .audience-item {
+        padding: 22px;
+        border-radius: 26px;
+        background: rgba(255,255,255,0.72);
+        border: 1px solid rgba(27, 39, 61, 0.07);
+      }
+
+      .audience-item strong {
+        display: block;
+        margin-bottom: 8px;
+        font-size: 18px;
+      }
+
+      .audience-item span {
+        display: block;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.8;
+      }
+
+      @keyframes float {
+        0%,
+        100% { transform: translateY(0) rotate(var(--rot)); }
+        50% { transform: translateY(-10px) rotate(var(--rot)); }
+      }
+
+      @keyframes shimmer {
+        0%,
+        25% { transform: translateX(-140%); }
+        65%,
+        100% { transform: translateX(140%); }
+      }
+
+      @keyframes drift {
+        0% { transform: translate3d(0, 0, 0); }
+        100% { transform: translate3d(16px, 18px, 0); }
+      }
+
+      .shot-main { --rot: -6deg; }
+      .shot-side { --rot: -12deg; }
+      .shot-bottom { --rot: 8deg; }
+      .shot-float { --rot: 6deg; }
+
+      @media (max-width: 1080px) {
+        h1 {
+          font-size: 56px;
+        }
+
+        .hero-grid,
+        .feature-layout,
+        .problem-grid,
+        .open-grid,
+        .stats-bar,
+        .audience-flow {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-stage {
+          min-height: 760px;
+        }
+
+        .feature-orbit {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      @media (max-width: 760px) {
+        body {
+          padding: 12px;
+        }
+
+        .page {
+          width: min(100%, calc(100% - 8px));
+        }
+
+        .hero,
+        .section-shell {
+          padding: 22px;
+        }
+
+        h1 {
+          font-size: 44px;
+        }
+
+        .lead {
+          font-size: 17px;
+        }
+
+        .hero-stage {
+          min-height: 620px;
+        }
+
+        .shot-main {
+          width: 86%;
+          height: 240px;
+          right: 4%;
+          top: 54px;
+        }
+
+        .shot-side {
+          width: 44%;
+          height: 130px;
+          left: 2%;
+          top: 30px;
+        }
+
+        .shot-bottom {
+          width: 52%;
+          height: 150px;
+          left: 8%;
+          bottom: 58px;
+        }
+
+        .shot-float {
+          width: 42%;
+          height: 120px;
+          right: 4%;
+          bottom: 28px;
+        }
+
+      }
+    </style>
+  </head>
+  <body>
+    <main class="page">
+      <section class="hero glass">
+        <div class="nav">
+          <div class="brand">
+            <span class="brand-mark"></span>
+            <span>DeskLibrary</span>
+          </div>
+          <div class="nav-pill">国内首个个人资源管理系统</div>
+        </div>
+
+        <div class="hero-grid">
+          <section>
+            <div class="eyebrow">先解决办公里的真实问题</div>
+            <h1>首个集便签、浏览器、文件夹、重要内容收藏与资源备份于一体的个人资源管理系统。</h1>
+            <p class="lead">
+              办公时最重要的不是收集更多工具，而是先提高效率。
+              <strong>把复制过的内容、常用文件、浏览器账号状态和桌面快捷入口集中起来</strong>，
+              才能少找、少翻、少重复操作。
+            </p>
+
+            <div class="hero-points">
+              <span class="hero-point">剪贴板收藏</span>
+              <span class="hero-point">资源库</span>
+              <span class="hero-point">浏览器卡片</span>
+              <span class="hero-point">悬浮图标</span>
+              <span class="hero-point">截图 OCR / 翻译</span>
+            </div>
+
+            <div class="stats-bar">
+              <article class="stat">
+                <strong>更快收进来</strong>
+                <span>随手复制、随手保存，不打断当前工作。</span>
+              </article>
+              <article class="stat">
+                <strong>更快找回来</strong>
+                <span>常用资料、模板和素材不再靠记忆回找。</span>
+              </article>
+              <article class="stat">
+                <strong>更快复用</strong>
+                <span>内容、资源和账号环境都能沉淀成长期资产。</span>
+              </article>
+              <article class="stat">
+                <strong>免费开源</strong>
+                <span>不是封闭工具，能直接看源码、自己部署和继续改。</span>
+              </article>
+            </div>
+          </section>
+
+          <section class="hero-stage">
+            <span class="glow glow-a"></span>
+            <span class="glow glow-b"></span>
+
+            <article class="shot shot-side">
+              <img src="./6.png" alt="悬浮图标" />
+            </article>
+            <article class="shot shot-main">
+              <img src="./1.png" alt="DeskLibrary 主界面" />
+            </article>
+            <article class="shot shot-bottom">
+              <img src="./3.png" alt="DeskLibrary 资源库" />
+            </article>
+            <article class="shot shot-float">
+              <img src="./7.png" alt="DeskLibrary 悬浮菜单" />
+            </article>
+
+            <div class="badge-float badge-1">把碎片内容收进一个入口</div>
+            <div class="badge-float badge-2">真实截图，而不是概念图</div>
+          </section>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-shell glass">
+          <div class="section-head">
+            <h2>它具体解决什么问题</h2>
+            <p>不再用左右对照解释，直接按场景拆成三类核心问题。</p>
+          </div>
+
+          <div class="problem-grid">
+            <article class="problem-card">
+              <span class="problem-no">01</span>
+              <strong>碎片内容太多， 回找效率太低</strong>
+              <p>文案、链接、截图、回复模板、数据片段散落在聊天、网页、文档里，下次还得重新翻。</p>
+              <ul>
+                <li>用剪贴板收藏沉淀文本和图片</li>
+                <li>支持搜索、筛选、常用归档</li>
+                <li>支持连续复制内容自动合并</li>
+              </ul>
+            </article>
+
+            <article class="problem-card">
+              <span class="problem-no">02</span>
+              <strong>资源入口太散， 常用资料不好管理</strong>
+              <p>模板、素材、项目目录、下载文件夹分散在各个路径里，路径越多，日常打开越慢。</p>
+              <ul>
+                <li>用资源库统一管理文件和文件夹</li>
+                <li>支持备份模式和快捷模式</li>
+                <li>支持备注、分类、快速打开</li>
+              </ul>
+            </article>
+
+            <article class="problem-card">
+              <span class="problem-no">03</span>
+              <strong>账号环境太乱， 多浏览器复用麻烦</strong>
+              <p>多个浏览器、多套账号、多种登录状态同时存在，切换和维护都很费时间。</p>
+              <ul>
+                <li>用浏览器卡片管理 Cookie 状态</li>
+                <li>支持导入、刷新、注入</li>
+                <li>适合电商、运营、测试、多账号办公</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-shell glass">
+          <div class="section-head">
+            <h2>核心功能，不止三个模块</h2>
+            <p>三个核心能力之外，还把真正高频的桌面辅助动作接进来了。</p>
+          </div>
+
+          <div class="feature-layout">
+            <div class="feature-main">
+              <h3>核心工作台</h3>
+              <p>DeskLibrary 的重点不是做“一个剪贴板工具”或“一个文件收藏夹”，而是把个人办公资源统一进一个可复用的工作台。</p>
+
+              <div class="feature-orbit">
+                <article class="feature-pill">
+                  <div class="icon">📋</div>
+                  <strong>剪贴板收藏</strong>
+                  <span>文本 / 图片自动收藏，支持搜索、筛选、常用沉淀。</span>
+                </article>
+                <article class="feature-pill">
+                  <div class="icon">📦</div>
+                  <strong>资源库</strong>
+                  <span>文件 / 文件夹统一收纳，支持备份模式和快捷模式。</span>
+                </article>
+                <article class="feature-pill">
+                  <div class="icon">🌐</div>
+                  <strong>浏览器卡片</strong>
+                  <span>Cookie 卡片化管理，支持导入、刷新、注入。</span>
+                </article>
+              </div>
+            </div>
+
+            <div class="feature-aside">
+              <article class="feature-mini">
+                <strong>悬浮图标</strong>
+                <p>不需要始终打开主界面，常用操作从桌面边缘直接呼出。</p>
+              </article>
+              <article class="feature-mini">
+                <strong>截图 OCR / 翻译</strong>
+                <p>适合快速提取图片文字，处理临时性的识别和理解任务。</p>
+              </article>
+              <article class="feature-mini">
+                <strong>托盘 + 快捷键 + 临时便签</strong>
+                <p>工具始终留在桌面工作流里，而不是开一次就丢失入口。</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-shell glass">
+          <div class="section-head">
+            <h2>为什么值得用</h2>
+            <p>核心不只是功能多，而是这些功能都和个人办公效率直接相关，而且免费开源。</p>
+          </div>
+
+          <div class="open-grid">
+            <div class="open-main">
+              <h3>一个能长期沉淀你个人资源的免费开源工作台</h3>
+              <p>很多工具只能处理一个局部问题，比如只管剪贴板、只管文件、只管浏览器。DeskLibrary 把这些高频需求合在一起，而且代码开放、可持续扩展，不会把你的工作流锁死在封闭产品里。</p>
+              <div class="free-badges">
+                <span class="free-badge">免费开源</span>
+                <span class="free-badge">Windows 桌面工具</span>
+                <span class="free-badge">支持自定义扩展和二次开发</span>
+                <span class="free-badge">真实面向办公效率场景</span>
+              </div>
+            </div>
+
+            <div class="open-list">
+              <article class="open-item">
+                <strong>实用，不是概念功能</strong>
+                <span>所有核心模块都围绕“收进来、找得到、再复用”这三件事展开。</span>
+              </article>
+              <article class="open-item">
+                <strong>免费开源，可持续演进</strong>
+                <span>不是买断后不可控的黑盒工具，而是可以自己看源码、自己改、自己继续迭代。</span>
+              </article>
+              <article class="open-item">
+                <strong>适合长期重度办公使用</strong>
+                <span>悬浮图标、托盘驻留、快捷键、截图 OCR、临时便签，都是为桌面工作流服务的。</span>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-shell glass">
+          <div class="section-head">
+            <h2>适合谁用</h2>
+            <p>如果你每天都在复制资料、整理文件、切账号、找入口，这页说的就是你。</p>
+          </div>
+
+          <div class="audience-flow">
+            <article class="audience-item">
+              <strong>电商 / 运营</strong>
+              <span>高频复制商品资料、管理素材、切换多个店铺和浏览器环境。</span>
+            </article>
+            <article class="audience-item">
+              <strong>内容 / 设计</strong>
+              <span>经常收集文案、图片、链接、灵感片段和素材文件夹。</span>
+            </article>
+            <article class="audience-item">
+              <strong>行政 / 销售 / 助理</strong>
+              <span>需要频繁回找模板、文档、回复内容和项目资料入口。</span>
+            </article>
+            <article class="audience-item">
+              <strong>多账号办公人群</strong>
+              <span>需要长期维护不同浏览器环境、测试账号和登录状态。</span>
+            </article>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
