@@ -96,6 +96,7 @@ let mainWindowDockCache = null;
 let mainWindowHideTimer = null;
 let mainWindowDragSuspendUntil = 0;
 let mainWindowDragSettleTimer = null;
+let mainWindowDragInProgress = false;
 let hoverSyncTimer = null;
 let registeredGlobalAccelerators = [];
 let hotkeyWarningText = '';
@@ -1592,17 +1593,41 @@ function clearMainWindowDragSettleTimer() {
   }
 }
 
+function setFloatingUiIgnoreMouseEvents(ignore) {
+  if (floatingWindow && !floatingWindow.isDestroyed()) {
+    floatingWindow.setIgnoreMouseEvents(!!ignore, { forward: true });
+  }
+  if (floatingMenuWindow && !floatingMenuWindow.isDestroyed()) {
+    if (ignore) {
+      floatingMenuWindow.setIgnoreMouseEvents(true, { forward: true });
+    } else {
+      floatingMenuWindow.setIgnoreMouseEvents(!!floatingMenuOpen);
+    }
+  }
+}
+
 function markMainWindowUserMoving() {
+  mainWindowDragInProgress = true;
   mainWindowDragSuspendUntil = Date.now() + MAIN_WINDOW_DRAG_SUSPEND_MS;
   clearMainWindowHideTimer();
   stopMainWindowAnimation();
+  setFloatingUiIgnoreMouseEvents(true);
+  if (floatingWindow && !floatingWindow.isDestroyed() && floatingWindow.isVisible()) {
+    floatingWindow.hide();
+  }
+  if (floatingMenuWindow && !floatingMenuWindow.isDestroyed() && floatingMenuWindow.isVisible()) {
+    floatingMenuWindow.hide();
+  }
   if (mainWindowDockMode === 'hidden') {
     mainWindowDockMode = 'visible';
   }
   clearMainWindowDragSettleTimer();
   mainWindowDragSettleTimer = setTimeout(() => {
     mainWindowDragSettleTimer = null;
+    mainWindowDragInProgress = false;
+    setFloatingUiIgnoreMouseEvents(false);
     if (!mainWindow || mainWindow.isDestroyed() || !mainWindow.isVisible()) return;
+    syncFloatingWindowVisibility();
     syncMainWindowDockVisibility();
   }, MAIN_WINDOW_DRAG_SUSPEND_MS + 40);
 }
@@ -2298,6 +2323,15 @@ function syncMainWindowDockVisibility(forceVisible = false) {
 function syncFloatingWindowVisibility() {
   if (!floatingWindow || floatingWindow.isDestroyed()) return;
   try {
+    if (mainWindowDragInProgress) {
+      if (floatingWindow.isVisible()) {
+        floatingWindow.hide();
+      }
+      if (floatingMenuWindow && !floatingMenuWindow.isDestroyed() && floatingMenuWindow.isVisible()) {
+        floatingMenuWindow.hide();
+      }
+      return;
+    }
     const settings = getSettings();
     if (floatingMenuOpen) {
       if (!settings.floatingIconEnabled) {
