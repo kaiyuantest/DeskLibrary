@@ -113,6 +113,7 @@ function normalizeImageAsset(input, config) {
     file: input.file || {},
     hash: input.hash || {},
     source: input.source || {},
+    capture: input.capture || {},
     vision: input.vision || {},
     note: input.note || ""
   };

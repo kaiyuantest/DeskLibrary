@@ -2707,7 +2707,7 @@ function execForegroundProbe(command, args, parser) {
     const output = execFileSync(command, args, {
       windowsHide: true,
       encoding: 'utf8',
-      timeout: 1200
+      timeout: 300
     }).trim();
     return parser(output);
   } catch {
@@ -3042,15 +3042,17 @@ function clipboardHasImageFormat() {
 }
 
 function readClipboardPayload() {
-  const image = clipboard.readImage();
-  if (!image.isEmpty()) {
-    const pngBuffer = image.toPNG();
-    return {
-      contentType: 'image',
-      imageBuffer: pngBuffer,
-      imageDataUrl: `data:image/png;base64,${pngBuffer.toString('base64')}`,
-      signature: storage.hashBuffer(pngBuffer)
-    };
+  if (clipboardHasImageFormat()) {
+    const image = clipboard.readImage();
+    if (!image.isEmpty()) {
+      const pngBuffer = image.toPNG();
+      return {
+        contentType: 'image',
+        imageBuffer: pngBuffer,
+        imageDataUrl: `data:image/png;base64,${pngBuffer.toString('base64')}`,
+        signature: storage.hashBuffer(pngBuffer)
+      };
+    }
   }
 
   const text = clipboard.readText();
@@ -3522,31 +3524,43 @@ function handleCopyShortcutAction(payload, sourceContext = null) {
 
 function scheduleCopyShortcutRead(attempt = 0, previousSignature = lastClipboardSignature, sourceContext = lastShortcutSourceContext || getForegroundWindowContext()) {
   setTimeout(() => {
-    const payload = readClipboardPayload();
-    const imagePending = clipboardHasImageFormat();
-
-    if (payload && payload.contentType === 'image') {
-      handleCopyShortcutAction(payload, sourceContext);
+    // 延迟到下一 tick 处理图片，防止同步 toPNG 阻塞事件循环
+    const pendingImage = clipboardHasImageFormat();
+    if (pendingImage) {
+      setImmediate(() => {
+        finishCopyShortcutRead(attempt, previousSignature, sourceContext);
+      });
       return;
     }
-
-    if (payload && payload.signature !== previousSignature) {
-      handleCopyShortcutAction(payload, sourceContext);
-      return;
-    }
-
-    if (payload && attempt >= 3 && !imagePending) {
-      handleCopyShortcutAction(payload, sourceContext);
-      return;
-    }
-
-    if (attempt < COPY_SHORTCUT_MAX_RETRIES) {
-      scheduleCopyShortcutRead(attempt + 1, previousSignature, sourceContext);
-      return;
-    }
-
-    sendSnapshot('未读取到复制内容');
+    finishCopyShortcutRead(attempt, previousSignature, sourceContext);
   }, COPY_SHORTCUT_POLL_DELAY_MS);
+}
+
+function finishCopyShortcutRead(attempt, previousSignature, sourceContext) {
+  const payload = readClipboardPayload();
+  const imagePending = clipboardHasImageFormat();
+
+  if (payload && payload.contentType === 'image') {
+    handleCopyShortcutAction(payload, sourceContext);
+    return;
+  }
+
+  if (payload && payload.signature !== previousSignature) {
+    handleCopyShortcutAction(payload, sourceContext);
+    return;
+  }
+
+  if (payload && attempt >= 3 && !imagePending) {
+    handleCopyShortcutAction(payload, sourceContext);
+    return;
+  }
+
+  if (attempt < COPY_SHORTCUT_MAX_RETRIES) {
+    scheduleCopyShortcutRead(attempt + 1, previousSignature, sourceContext);
+    return;
+  }
+
+  sendSnapshot('未读取到复制内容');
 }
 
 function isCopyShortcut(event) {
@@ -3687,20 +3701,34 @@ function isConfiguredPostCopyKey(event, configuredShortcut) {
 }
 
 function setupClipboardPolling() {
+  let lastQuickSig = '';
+
   setInterval(() => {
-    const payload = readClipboardPayload();
-    if (!payload) return;
-    if (payload.signature === suppressedPollingSignature && Date.now() <= suppressedPollingUntil) {
+    // 轻量级快速检测：只检查格式列表和文本预览，不做图片解码
+    // 解决透明悬浮窗因主线程阻塞导致 DWM 合成延迟、整机卡顿的问题
+    const formats = clipboard.availableFormats().join(',');
+    const textPreview = clipboard.readText().slice(0, 50);
+    const quickSig = `${formats}|${textPreview.length > 0 ? storage.hashText(textPreview) : ''}`;
+
+    if (quickSig === lastQuickSig) return;
+    lastQuickSig = quickSig;
+
+    // 内容有变化 → setImmediate 延迟处理，让事件循环先处理渲染/DWM 帧
+    setImmediate(() => {
+      const payload = readClipboardPayload();
+      if (!payload) return;
+      if (payload.signature === suppressedPollingSignature && Date.now() <= suppressedPollingUntil) {
+        lastClipboardSignature = payload.signature;
+        return;
+      }
+      if (payload.signature === lastClipboardSignature) return;
       lastClipboardSignature = payload.signature;
-      return;
-    }
-    if (payload.signature === lastClipboardSignature) return;
-    lastClipboardSignature = payload.signature;
-    if (ignoreNextClipboardChange) {
-      ignoreNextClipboardChange = false;
-      return;
-    }
-    handleClipboardChanged(payload, 'clipboard_poll');
+      if (ignoreNextClipboardChange) {
+        ignoreNextClipboardChange = false;
+        return;
+      }
+      handleClipboardChanged(payload, 'clipboard_poll');
+    });
   }, 300);
 }
 
@@ -3932,8 +3960,10 @@ function setupKeyboardListener() {
       updateModifierState(event, true);
 
       if (isCopyShortcut(event)) {
-        lastShortcutSourceContext = getForegroundWindowContext();
-        scheduleCopyShortcutRead(0, lastClipboardSignature, lastShortcutSourceContext);
+        setImmediate(() => {
+          lastShortcutSourceContext = getForegroundWindowContext();
+          scheduleCopyShortcutRead(0, lastClipboardSignature, lastShortcutSourceContext);
+        });
         return;
       }
 
@@ -4233,6 +4263,36 @@ function setupIpc() {
     return {
       canceled: result.canceled,
       paths: result.filePaths || []
+    };
+  });
+
+  ipcMain.handle('classify-asset-paths', async (_, paths = []) => {
+    const normalizedPaths = Array.isArray(paths)
+      ? [...new Set(paths.map((item) => String(item || '').trim()).filter(Boolean))]
+      : [];
+    const entries = [];
+
+    for (const targetPath of normalizedPaths) {
+      try {
+        const stats = await fsp.stat(targetPath);
+        entries.push({
+          path: targetPath,
+          exists: true,
+          entryType: stats.isDirectory() ? 'folder' : 'file'
+        });
+      } catch {
+        entries.push({
+          path: targetPath,
+          exists: false,
+          entryType: 'missing'
+        });
+      }
+    }
+
+    return {
+      ok: true,
+      entries,
+      hasFolders: entries.some((item) => item.entryType === 'folder')
     };
   });
 
@@ -5667,6 +5727,145 @@ function setupIpc() {
       mainWindow.close();
     }
     return { ok: true };
+  });
+
+  ipcMain.handle('export-selected-records', async (_, ids = []) => {
+    try {
+      const selectedIds = Array.isArray(ids) ? ids.map((id) => Number(id)) : [];
+      if (!selectedIds.length) {
+        const result = await dialog.showSaveDialog(mainWindow, {
+          title: '导出备份',
+          defaultPath: `DeskLibrary-backup-${new Date().toISOString().slice(0, 10)}.json`,
+          filters: [{ name: 'JSON 备份', extensions: ['json'] }]
+        });
+        if (result.canceled || !result.filePath) return { ok: false, message: '已取消' };
+        // Export all records
+        const snapshot = isNextVaultReadEnabled() ? await buildNextVaultSnapshot() : null;
+        const allRecords = isNextVaultReadEnabled() && snapshot
+          ? [...(snapshot.records || [])]
+          : storage.getAllRecords().map((item) => normalizeRecord(item));
+        const backup = {
+          version: '1.0.0',
+          exportedAt: new Date().toISOString(),
+          records: allRecords.map((r) => ({
+            id: r.id,
+            contentType: r.contentType,
+            textContent: r.textContent || '',
+            imageDataUrl: r.imageDataUrl || '',
+            imagePath: r.imagePath || '',
+            contentHash: r.contentHash || '',
+            captureMethod: r.captureMethod || 'manual',
+            category: r.category || 'daily',
+            sourceApp: r.sourceAppDisplay || r.sourceApp || '',
+            windowTitle: r.windowTitleDisplay || r.windowTitle || '',
+            editableNote: r.editableNote || r.note || '',
+            createdAt: r.createdAt || '',
+            updatedAt: r.updatedAt || ''
+          }))
+        };
+        await fsp.writeFile(result.filePath, JSON.stringify(backup, null, 2), 'utf8');
+        sendSnapshot(`已导出 ${backup.records.length} 条记录`);
+        return { ok: true, count: backup.records.length, path: result.filePath };
+      }
+
+      if (!isNextVaultReadEnabled() || !legacyIngestBridge?.vault?.objects) {
+        return { ok: false, message: 'NextVault 未启用，选中记录导出需要 NextVault' };
+      }
+
+      const exported = [];
+      for (const uiId of selectedIds) {
+        const target = await findNextVaultRecordByUiId(uiId);
+        if (!target) continue;
+        const item = {
+          kind: target.kind,
+          object: target.object
+        };
+        if (target.kind === 'image' && target.object?.file?.path) {
+          const imgPath = path.join(legacyIngestBridge.vault.rootPath, target.object.file.path);
+          try {
+            const buf = await fsp.readFile(imgPath);
+            item.imageBase64 = buf.toString('base64');
+          } catch {}
+        }
+        exported.push(item);
+      }
+
+      if (!exported.length) return { ok: false, message: '没有可导出的记录' };
+
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: '导出选中记录',
+        defaultPath: `DeskLibrary-backup-${new Date().toISOString().slice(0, 10)}.json`,
+        filters: [{ name: 'JSON 备份', extensions: ['json'] }]
+      });
+      if (result.canceled || !result.filePath) return { ok: false, message: '已取消' };
+
+      const backup = {
+        version: '1.0.0',
+        exportedAt: new Date().toISOString(),
+        count: exported.length,
+        items: exported
+      };
+      await fsp.writeFile(result.filePath, JSON.stringify(backup, null, 2), 'utf8');
+      sendSnapshot(`已导出 ${exported.length} 条记录`);
+      return { ok: true, count: exported.length, path: result.filePath };
+    } catch (error) {
+      return { ok: false, message: error && error.message ? error.message : '导出失败' };
+    }
+  });
+
+  ipcMain.handle('import-records', async () => {
+    try {
+      const result = await dialog.showOpenDialog(mainWindow, {
+        title: '导入备份',
+        filters: [{ name: 'JSON 备份', extensions: ['json'] }],
+        properties: ['openFile']
+      });
+      if (result.canceled || !result.filePaths?.[0]) return { ok: false, message: '已取消' };
+
+      const raw = await fsp.readFile(result.filePaths[0], 'utf8');
+      const backup = JSON.parse(raw);
+      if (!backup || !Array.isArray(backup.items) || !backup.items.length) {
+        return { ok: false, message: '备份文件格式不正确或内容为空' };
+      }
+
+      if (!isNextVaultReadEnabled() || !legacyIngestBridge?.vault?.objects) {
+        return { ok: false, message: 'NextVault 未启用' };
+      }
+
+      let imported = 0;
+      for (const item of backup.items) {
+        try {
+          if (item.kind === 'text' && item.object?.text) {
+            await legacyIngestBridge.ingestTextRecord(item.object.text, {
+              captureMethod: item.object?.capture?.method || 'manual',
+              category: item.object?.capture?.category || 'daily',
+              sourceApp: item.object?.source?.app || '',
+              windowTitle: item.object?.source?.windowTitle || ''
+            });
+            imported++;
+          } else if (item.kind === 'image' && item.imageBase64) {
+            const buffer = Buffer.from(item.imageBase64, 'base64');
+            await legacyIngestBridge.ingestClipboardPayload(
+              { contentType: 'image', imageBuffer: buffer },
+              {
+                captureMethod: item.object?.capture?.method || 'manual',
+                category: item.object?.capture?.category || 'daily',
+                sourceApp: item.object?.source?.app || '',
+                windowTitle: item.object?.source?.windowTitle || ''
+              }
+            );
+            imported++;
+          }
+        } catch (e) {
+          console.error('Import item failed:', e);
+        }
+      }
+
+      sendSnapshot(`已导入 ${imported} 条记录`);
+      return { ok: true, count: imported };
+    } catch (error) {
+      return { ok: false, message: error && error.message ? error.message : '导入失败' };
+    }
   });
 }
 

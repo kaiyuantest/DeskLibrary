@@ -153,6 +153,8 @@
                   <button id="dailyToggleMultiSelectBtn" class="text-action" type="button">退出多选</button>
                   <button id="dailySelectAllBtn" class="text-action" type="button">全选本页</button>
                   <button id="dailyClearSelectionBtn" class="text-action" type="button">清空</button>
+                  <button id="dailyExportSelectedBtn" class="text-action" type="button">导出选中</button>
+                  <button id="dailyImportBtn" class="text-action" type="button">导入</button>
                   <button id="dailyDeleteSelectedBtn" class="text-action danger" type="button">删除选中</button>
                 </div>
               </section>
@@ -165,7 +167,7 @@
                 <span id="dailyCount" class="count-chip">0</span>
               </section>
               <section id="recordsList" class="cards-grid"></section>
-              <div id="dailyPagination" class="pagination-bar"></div>
+              <div class="page-size-row"><span class="page-size-label">每页</span><select id="dailyPageSizeSelect" class="page-size-select"><option value="12">12</option><option value="30">30</option><option value="60">60</option><option value="100">100</option></select><span class="page-size-label">条</span></div><div id="dailyPagination" class="pagination-bar"></div>
             </section>
 
             <section id="commonPage" class="page-view page-scroll hidden">
@@ -179,6 +181,8 @@
                     <button id="commonToggleMultiSelectBtn" class="text-action" type="button">退出多选</button>
                     <button id="commonSelectAllBtn" class="text-action" type="button">全选当前</button>
                     <button id="commonClearSelectionBtn" class="text-action" type="button">清空</button>
+                    <button id="commonExportSelectedBtn" class="text-action" type="button">导出选中</button>
+                    <button id="commonImportBtn" class="text-action" type="button">导入</button>
                     <button id="commonDeleteSelectedBtn" class="text-action danger" type="button">删除选中</button>
                   </div>
                 </section>
@@ -552,6 +556,8 @@
     <div id="recordModal" class="modal hidden">
       <div id="modalOverlay" class="modal-overlay"></div>
       <section class="modal-card">
+        <button id="modalPrevBtn" class="modal-nav-btn modal-nav-prev" title="上一个">‹</button>
+        <button id="modalNextBtn" class="modal-nav-btn modal-nav-next" title="下一个">›</button>
         <div class="modal-head">
           <div>
             <div id="modalTitle" class="modal-title">请选择一条记录</div>

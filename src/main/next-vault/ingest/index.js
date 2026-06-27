@@ -61,6 +61,29 @@ async function copyFileIntoExternalTarget(sourcePath, targetPath) {
   await fs.copyFile(sourcePath, targetPath);
 }
 
+async function copyPathRecursive(sourcePath, targetPath) {
+  const sourceStats = await fs.stat(sourcePath);
+  if (sourceStats.isDirectory()) {
+    await fs.mkdir(targetPath, { recursive: true });
+    const children = await fs.readdir(sourcePath);
+    for (const child of children) {
+      await copyPathRecursive(path.join(sourcePath, child), path.join(targetPath, child));
+    }
+    return;
+  }
+
+  await fs.mkdir(path.dirname(targetPath), { recursive: true });
+  await fs.copyFile(sourcePath, targetPath);
+}
+
+async function copyPathIntoVault(sourcePath, targetPath) {
+  await copyPathRecursive(sourcePath, targetPath);
+}
+
+async function copyPathIntoExternalTarget(sourcePath, targetPath) {
+  await copyPathRecursive(sourcePath, targetPath);
+}
+
 async function statSafe(targetPath) {
   try {
     return await fs.stat(targetPath);
@@ -198,6 +221,11 @@ class IngestService {
           app: input.sourceApp || existing?.source?.app || "",
           windowTitle: input.windowTitle || existing?.source?.windowTitle || ""
         },
+        capture: {
+          ...(existing.capture || {}),
+          method: input.captureMethod || existing?.capture?.method || "auto",
+          category: input.category || existing?.capture?.category || "daily"
+        },
         vision: {
           ...(existing.vision || {}),
           ocrText: input.ocrText || existing?.vision?.ocrText || "",
@@ -235,6 +263,10 @@ class IngestService {
         app: input.sourceApp || "",
         windowTitle: input.windowTitle || ""
       },
+      capture: {
+        method: input.captureMethod || "auto",
+        category: input.category || "daily"
+      },
       vision: {
         ocrText: input.ocrText || "",
         caption: input.caption || "",
@@ -271,6 +303,8 @@ class IngestService {
         sourceType: options.sourceType || "clipboard",
         sourceApp: options.sourceApp || "",
         windowTitle: options.windowTitle || "",
+        captureMethod: options.captureMethod || "auto",
+        category: options.category || "daily",
         ocrText: options.ocrText || "",
         caption: options.caption || "",
         labels: options.labels || [],
@@ -322,10 +356,6 @@ class IngestService {
 
     if (mode === "backup") {
       const baseName = sanitizeName(path.basename(sourcePath));
-      if (entryType === "folder") {
-        throw new Error("Folder backup is not supported in the current ingest MVP");
-      }
-
       const configuredBackupRoot = this.resolveBackupRootPath(input);
       if (configuredBackupRoot) {
         const absoluteStoredPath = path.join(
@@ -335,7 +365,7 @@ class IngestService {
           day,
           `${fileId}-${baseName}`
         );
-        await copyFileIntoExternalTarget(sourcePath, absoluteStoredPath);
+        await copyPathIntoExternalTarget(sourcePath, absoluteStoredPath);
         storedPath = absoluteStoredPath;
         primaryPath = absoluteStoredPath;
       } else {
@@ -349,7 +379,7 @@ class IngestService {
           `${fileId}-${baseName}`
         );
         const absoluteStoredPath = path.join(this.vault.rootPath, relativeStoredPath);
-        await copyFileIntoVault(sourcePath, absoluteStoredPath);
+        await copyPathIntoVault(sourcePath, absoluteStoredPath);
         storedPath = relativeStoredPath;
         primaryPath = relativeStoredPath;
       }
@@ -396,7 +426,9 @@ class IngestService {
         ...entry,
         mode: entry.mode || mode,
         importedAt: options.importedAt || entry.importedAt,
-        note: entry.note || options.note || ""
+        note: entry.note || options.note || "",
+        backupRootPath: entry.backupRootPath || entry.backupDir || options.backupRootPath || options.backupDir || "",
+        backupDir: entry.backupDir || entry.backupRootPath || options.backupDir || options.backupRootPath || ""
       });
       imported.push(importedAsset);
     }

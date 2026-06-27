@@ -110,8 +110,11 @@ const els = {
   dailyToggleMultiSelectBtn: document.getElementById('dailyToggleMultiSelectBtn'),
   dailySelectAllBtn: document.getElementById('dailySelectAllBtn'),
   dailyClearSelectionBtn: document.getElementById('dailyClearSelectionBtn'),
+  dailyExportSelectedBtn: document.getElementById('dailyExportSelectedBtn'),
+  dailyImportBtn: document.getElementById('dailyImportBtn'),
   dailyDeleteSelectedBtn: document.getElementById('dailyDeleteSelectedBtn'),
   dailyMultiEntry: document.getElementById('dailyMultiEntry'),
+  dailyPageSizeSelect: document.getElementById('dailyPageSizeSelect'),
   dailyPagination: document.getElementById('dailyPagination'),
   commonRecordsList: document.getElementById('commonRecordsList'),
   commonBulkbar: document.getElementById('commonBulkbar'),
@@ -120,6 +123,8 @@ const els = {
   commonToggleMultiSelectBtn: document.getElementById('commonToggleMultiSelectBtn'),
   commonSelectAllBtn: document.getElementById('commonSelectAllBtn'),
   commonClearSelectionBtn: document.getElementById('commonClearSelectionBtn'),
+  commonExportSelectedBtn: document.getElementById('commonExportSelectedBtn'),
+  commonImportBtn: document.getElementById('commonImportBtn'),
   commonDeleteSelectedBtn: document.getElementById('commonDeleteSelectedBtn'),
   commonMultiEntry: document.getElementById('commonMultiEntry'),
   topDailyList: document.getElementById('topDailyList'),
@@ -225,6 +230,8 @@ const els = {
   shortcutCaptureConfirmBtn: document.getElementById('shortcutCaptureConfirmBtn'),
   recordModal: document.getElementById('recordModal'),
   modalOverlay: document.getElementById('modalOverlay'),
+  modalPrevBtn: document.getElementById('modalPrevBtn'),
+  modalNextBtn: document.getElementById('modalNextBtn'),
   closeModalBtn: document.getElementById('closeModalBtn'),
   modalTitle: document.getElementById('modalTitle'),
   modalSubline: document.getElementById('modalSubline'),
@@ -363,7 +370,16 @@ function filterRecordsByControls(records) {
 }
 
 function dailyRecords() {
-  let records = state.records.filter((item) => (item.category || 'daily') !== 'common');
+  let records = state.records;
+  const hasKeyword = !!state.searchKeyword.trim().toLowerCase();
+
+  if (hasKeyword) {
+    // 搜索时包含所有类别（每日+常用），不过滤日期
+    return filterRecordsByControls(records);
+  }
+
+  // 无搜索关键词：只显示每日内容
+  records = records.filter((item) => (item.category || 'daily') !== 'common');
 
   if (state.selectedCalendarDate) {
     records = records.filter((item) => item.createdDate === state.selectedCalendarDate);
@@ -375,7 +391,16 @@ function dailyRecords() {
 }
 
 function commonRecords() {
-  return filterRecordsByControls(state.records
+  let records = state.records;
+  const hasKeyword = !!state.searchKeyword.trim().toLowerCase();
+
+  if (hasKeyword) {
+    // 搜索时包含所有类别（每日+常用）
+    return filterRecordsByControls(records);
+  }
+
+  // 无搜索关键词：只显示常用
+  return filterRecordsByControls(records
     .filter((item) => (item.category || 'daily') === 'common')
     .sort((left, right) => {
       const hitDelta = Number(right.hitCount || 1) - Number(left.hitCount || 1);
@@ -509,6 +534,7 @@ function escapeHtml(value) {
 function render() {
   els.statusText.textContent = state.statusText;
   els.dailySearchInput.value = state.searchKeyword;
+  if (els.dailyPageSizeSelect) els.dailyPageSizeSelect.value = String(state.pageSize);
   els.imageOnlyToggle.classList.toggle('active', !!state.imageOnly);
   els.dailyDatePicker.value = state.selectedCalendarDate;
   if (els.assetSearchInput) {
@@ -2397,6 +2423,20 @@ async function deleteSelectedRecordsCurrentView() {
 async function importAssetPaths(paths, mode) {
   const validPaths = [...new Set((paths || []).map((item) => String(item || '').trim()).filter(Boolean))];
   if (!validPaths.length) return;
+  if (mode === 'backup') {
+    const classification = await window.deskLibrary.classifyAssetPaths(validPaths);
+    if (classification && classification.ok !== false && classification.hasFolders) {
+      const folderCount = Array.isArray(classification.entries)
+        ? classification.entries.filter((item) => item.entryType === 'folder').length
+        : 0;
+      const confirmed = window.confirm(
+        `本次拖入包含 ${folderCount} 个文件夹。备份会复制文件夹内全部内容，可能耗时较长并占用较多磁盘空间。确认继续备份吗？`
+      );
+      if (!confirmed) {
+        return;
+      }
+    }
+  }
   const result = await window.deskLibrary.importAssets({
     mode,
     paths: validPaths
@@ -2742,6 +2782,13 @@ els.dailyClearSelectionBtn?.addEventListener('click', () => {
   clearRecordSelectionCurrentView();
   render();
 });
+els.dailyExportSelectedBtn?.addEventListener('click', async () => {
+  const ids = selectedRecordIdsForCurrentView();
+  await window.deskLibrary.exportSelectedRecords(ids);
+});
+els.dailyImportBtn?.addEventListener('click', async () => {
+  await window.deskLibrary.importRecords();
+});
 els.dailyDeleteSelectedBtn?.addEventListener('click', async () => {
   await deleteSelectedRecordsCurrentView();
 });
@@ -2751,6 +2798,13 @@ els.commonSelectAllBtn?.addEventListener('click', () => selectAllRecordsCurrentV
 els.commonClearSelectionBtn?.addEventListener('click', () => {
   clearRecordSelectionCurrentView();
   render();
+});
+els.commonExportSelectedBtn?.addEventListener('click', async () => {
+  const ids = selectedRecordIdsForCurrentView();
+  await window.deskLibrary.exportSelectedRecords(ids);
+});
+els.commonImportBtn?.addEventListener('click', async () => {
+  await window.deskLibrary.importRecords();
 });
 els.commonDeleteSelectedBtn?.addEventListener('click', async () => {
   await deleteSelectedRecordsCurrentView();
@@ -2816,6 +2870,12 @@ els.sourceFilterSelect?.addEventListener('change', (event) => {
   state.selectedSourceApp = event.target.value || '全部来源';
   state.currentPageNumber = 1;
   ensureValidSelection();
+  render();
+});
+
+els.dailyPageSizeSelect?.addEventListener('change', (event) => {
+  state.pageSize = Number(event.target?.value) || 12;
+  state.currentPageNumber = 1;
   render();
 });
 
@@ -2911,6 +2971,38 @@ els.openBrowserImportModalBtn?.addEventListener('click', async () => {
 });
 
 els.modalOverlay.addEventListener('click', closeModal);
+els.modalPrevBtn?.addEventListener('click', () => {
+  const list = recordsForCurrentPage();
+  if (!list.length) return;
+  const currentIndex = list.findIndex((item) => item.id === state.selectedRecordId);
+  if (currentIndex <= 0) return;
+  state.selectedRecordId = list[currentIndex - 1].id;
+  renderModal();
+});
+
+els.modalNextBtn?.addEventListener('click', () => {
+  const list = recordsForCurrentPage();
+  if (!list.length) return;
+  const currentIndex = list.findIndex((item) => item.id === state.selectedRecordId);
+  if (currentIndex < 0 || currentIndex >= list.length - 1) return;
+  state.selectedRecordId = list[currentIndex + 1].id;
+  renderModal();
+});
+
+els.recordModal?.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowLeft') {
+    event.preventDefault();
+    const list = recordsForCurrentPage();
+    const idx = list.findIndex((item) => item.id === state.selectedRecordId);
+    if (idx > 0) { state.selectedRecordId = list[idx - 1].id; renderModal(); }
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    const list = recordsForCurrentPage();
+    const idx = list.findIndex((item) => item.id === state.selectedRecordId);
+    if (idx >= 0 && idx < list.length - 1) { state.selectedRecordId = list[idx + 1].id; renderModal(); }
+  }
+});
+
 els.closeModalBtn.addEventListener('click', closeModal);
 els.assetModalOverlay?.addEventListener('click', closeAssetModal);
 els.closeAssetModalBtn?.addEventListener('click', closeAssetModal);

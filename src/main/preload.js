@@ -17,6 +17,7 @@ contextBridge.exposeInMainWorld('deskLibrary', {
   copyRecordContent: (id) => ipcRenderer.invoke('copy-record-content', id),
   selectAssetFiles: () => ipcRenderer.invoke('select-asset-files'),
   selectAssetFolders: () => ipcRenderer.invoke('select-asset-folders'),
+  classifyAssetPaths: (paths) => ipcRenderer.invoke('classify-asset-paths', paths),
   selectFolder: () => ipcRenderer.invoke('select-folder'),
   selectFloatingIconFile: () => ipcRenderer.invoke('select-floating-icon-file'),
   importAssets: (payload) => ipcRenderer.invoke('import-assets', payload),
@@ -56,6 +57,8 @@ contextBridge.exposeInMainWorld('deskLibrary', {
   toggleMaximizeWindow: () => ipcRenderer.invoke('window-toggle-maximize'),
   closeWindow: () => ipcRenderer.invoke('window-close'),
   openExternalUrl: (url) => ipcRenderer.invoke('open-external-url', url),
+  exportSelectedRecords: (ids) => ipcRenderer.invoke('export-selected-records', ids),
+  importRecords: () => ipcRenderer.invoke('import-records'),
   onSnapshot: (callback) => ipcRenderer.on('snapshot', (_, payload) => callback(payload)),
   onNavigatePage: (callback) => ipcRenderer.on('navigate-page', (_, payload) => callback(payload)),
   onOpenRecordDetail: (callback) => ipcRenderer.on('open-record-detail', (_, payload) => callback(payload))

@@ -198,6 +198,11 @@ class IngestService {
           app: input.sourceApp || existing?.source?.app || "",
           windowTitle: input.windowTitle || existing?.source?.windowTitle || ""
         },
+        capture: {
+          ...(existing.capture || {}),
+          method: input.captureMethod || existing?.capture?.method || "auto",
+          category: input.category || existing?.capture?.category || "daily"
+        },
         vision: {
           ...(existing.vision || {}),
           ocrText: input.ocrText || existing?.vision?.ocrText || "",
@@ -235,6 +240,10 @@ class IngestService {
         app: input.sourceApp || "",
         windowTitle: input.windowTitle || ""
       },
+      capture: {
+        method: input.captureMethod || "auto",
+        category: input.category || "daily"
+      },
       vision: {
         ocrText: input.ocrText || "",
         caption: input.caption || "",
@@ -271,6 +280,8 @@ class IngestService {
         sourceType: options.sourceType || "clipboard",
         sourceApp: options.sourceApp || "",
         windowTitle: options.windowTitle || "",
+        captureMethod: options.captureMethod || "auto",
+        category: options.category || "daily",
         ocrText: options.ocrText || "",
         caption: options.caption || "",
         labels: options.labels || [],
