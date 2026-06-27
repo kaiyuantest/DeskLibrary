@@ -110,6 +110,7 @@ const els = {
   dailyToggleMultiSelectBtn: document.getElementById('dailyToggleMultiSelectBtn'),
   dailySelectAllBtn: document.getElementById('dailySelectAllBtn'),
   dailyClearSelectionBtn: document.getElementById('dailyClearSelectionBtn'),
+  dailyViewContentBtn: document.getElementById('dailyViewContentBtn'),
   dailyExportSelectedBtn: document.getElementById('dailyExportSelectedBtn'),
   dailyImportBtn: document.getElementById('dailyImportBtn'),
   dailyDeleteSelectedBtn: document.getElementById('dailyDeleteSelectedBtn'),
@@ -123,6 +124,7 @@ const els = {
   commonToggleMultiSelectBtn: document.getElementById('commonToggleMultiSelectBtn'),
   commonSelectAllBtn: document.getElementById('commonSelectAllBtn'),
   commonClearSelectionBtn: document.getElementById('commonClearSelectionBtn'),
+  commonViewContentBtn: document.getElementById('commonViewContentBtn'),
   commonExportSelectedBtn: document.getElementById('commonExportSelectedBtn'),
   commonImportBtn: document.getElementById('commonImportBtn'),
   commonDeleteSelectedBtn: document.getElementById('commonDeleteSelectedBtn'),
@@ -2782,6 +2784,11 @@ els.dailyClearSelectionBtn?.addEventListener('click', () => {
   clearRecordSelectionCurrentView();
   render();
 });
+els.dailyViewContentBtn?.addEventListener('click', async () => {
+  const ids = selectedRecordIdsForCurrentView();
+  await window.deskLibrary.viewSelectedContent(ids);
+});
+
 els.dailyExportSelectedBtn?.addEventListener('click', async () => {
   const ids = selectedRecordIdsForCurrentView();
   await window.deskLibrary.exportSelectedRecords(ids);
@@ -2799,6 +2806,11 @@ els.commonClearSelectionBtn?.addEventListener('click', () => {
   clearRecordSelectionCurrentView();
   render();
 });
+els.commonViewContentBtn?.addEventListener('click', async () => {
+  const ids = selectedRecordIdsForCurrentView();
+  await window.deskLibrary.viewSelectedContent(ids);
+});
+
 els.commonExportSelectedBtn?.addEventListener('click', async () => {
   const ids = selectedRecordIdsForCurrentView();
   await window.deskLibrary.exportSelectedRecords(ids);

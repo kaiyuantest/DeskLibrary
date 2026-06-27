@@ -5867,6 +5867,58 @@ function setupIpc() {
       return { ok: false, message: error && error.message ? error.message : '导入失败' };
     }
   });
+
+  function h(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
+  ipcMain.handle('view-selected-content', async (_, ids = []) => {
+    try {
+      const selectedIds = Array.isArray(ids) ? ids.map((id) => Number(id)) : [];
+      if (!selectedIds.length) return { ok: false, message: '未选中任何记录' };
+
+      const htmlParts = ['<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><title>选中内容</title><style>',
+        'body{font-family:system-ui,sans-serif;max-width:860px;margin:0 auto;padding:20px;background:#f8f9fb;color:#1a1a2e}',
+        '.item{border-bottom:1px solid #e2e8f0;padding:12px 0}',
+        '.num{font-weight:700;color:#1d5ee6;margin-right:6px}',
+        '.title{font-weight:600;font-size:16px;margin-bottom:6px}',
+        '.text{white-space:pre-wrap;line-height:1.7;color:#333;margin:4px 0}',
+        '.meta{font-size:12px;color:#888;margin-top:6px}',
+        '.note{background:#fffbe6;padding:6px 10px;border-radius:6px;margin:6px 0;color:#8b6914}',
+        'img{max-width:100%;border-radius:8px;margin:8px 0}',
+        '</style></head><body>'];
+
+      const currentRecords = isNextVaultReadEnabled()
+        ? ((await buildNextVaultSnapshot())?.records || [])
+        : storage.getAllRecords().map((item) => normalizeRecord(item));
+
+      let idx = 0;
+      for (const id of selectedIds) {
+        const record = currentRecords.find((r) => r.id === id);
+        if (!record) continue;
+        idx++;
+        htmlParts.push('<div class="item">');
+        htmlParts.push('<div class="title"><span class="num">' + idx + '.</span>' + h(record.displayTitle || record.title || (record.textContent || '').slice(0, 60) || '空') + '</div>');
+        if (record.contentType === 'image' && record.imageDataUrl) {
+          htmlParts.push('<img src="' + record.imageDataUrl + '" alt="图片">');
+        }
+        if (record.textContent) {
+          htmlParts.push('<div class="text">' + h(record.textContent) + '</div>');
+        }
+        if (record.editableNote || record.note) {
+          htmlParts.push('<div class="note">' + h(record.editableNote || record.note) + '</div>');
+        }
+        htmlParts.push('<div class="meta">来源: ' + h(record.sourceAppDisplay || record.sourceApp || '未知') + ' · ' + h(record.lastCapturedAt || record.updatedAt || '') + '</div>');
+        htmlParts.push('</div>');
+      }
+
+      htmlParts.push('</body></html>');
+      const filePath = path.join(app.getPath('temp'), 'desklibrary-selected-' + Date.now() + '.html');
+      await fsp.writeFile(filePath, htmlParts.join('\n'), 'utf8');
+      await shell.openPath(filePath);
+      return { ok: true, count: idx };
+    } catch (error) {
+      return { ok: false, message: error && error.message ? error.message : '生成失败' };
+    }
+  });
 }
 
 app.whenReady().then(async () => {
